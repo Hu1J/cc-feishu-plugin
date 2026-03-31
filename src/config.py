@@ -13,6 +13,7 @@ class FeishuConfig:
     app_id: str
     app_secret: str
     bot_name: str = "Claude"
+    domain: str = "feishu"
 
 
 @dataclass
