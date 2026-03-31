@@ -33,8 +33,20 @@ def test_on_message_callback():
     mock_sender.sender_id.open_id = "user_xyz"
     mock_event.sender = mock_sender
 
-    client._handle_p2p_message(mock_event)
-    asyncio.get_event_loop().run_until_complete(asyncio.sleep(0))
+    # Run handler + yield in a proper event loop to avoid "no current event loop" error
+    async def run_test():
+        client._handle_p2p_message(mock_event)
+        # Give the scheduled callback a chance to run
+        await asyncio.sleep(0)
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(run_test())
+    finally:
+        asyncio.set_event_loop(None)
+        loop.close()
+
     cb.assert_called_once()
     msg = cb.call_args[0][0]
     assert msg.message_id == "msg_123"

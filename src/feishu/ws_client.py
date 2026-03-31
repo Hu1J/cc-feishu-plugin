@@ -94,14 +94,14 @@ class FeishuWSClient:
         if self._ws_client is not None:
             return
 
-        handler = self._build_event_handler()
+        self._handler = self._build_event_handler()
         base_url = "https://open.feishu.cn" if self.domain == "feishu" else "https://open.larksuite.com"
 
         self._ws_client = lark.ws.Client(
             self.app_id,
             self.app_secret,
             log_level=lark.LogLevel.INFO,
-            event_handler=handler,
+            event_handler=self._handler,
             domain=base_url,
             auto_reconnect=True,
         )
