@@ -96,9 +96,12 @@ async def interactive_install(config_path: str):
     """Run the QR-code install flow, then start server."""
     from src.install.flow import run_install_flow
     result = await run_install_flow(config_path)
-    # After install flow saves config, load and start server
-    # run_server() is blocking (runs forever as web server)
-    run_server(config_path)
+    # Start server in a thread pool executor to avoid nested event loop conflict.
+    # web.run_app() calls asyncio.run() internally, which cannot run inside an
+    # existing loop, so we offload it to a worker thread.
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, run_server, config_path)
+    # run_in_executor never returns since run_server blocks forever
 
 
 def main():
