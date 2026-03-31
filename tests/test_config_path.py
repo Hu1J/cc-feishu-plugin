@@ -1,12 +1,13 @@
 import os
 import tempfile
 from pathlib import Path
+import pytest
 
-def test_resolve_config_path_creates_cc_dir():
+def test_resolve_config_path_creates_cc_dir(monkeypatch):
     """resolve_config_path creates .cc-feishu/ in cwd if not exists."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = str(Path(tmpdir).resolve())
-        os.chdir(tmpdir)
+        monkeypatch.chdir(tmpdir)
         from src.config import resolve_config_path
         cfg, data_dir = resolve_config_path()
 
@@ -14,7 +15,7 @@ def test_resolve_config_path_creates_cc_dir():
         assert data_dir == f"{tmpdir}/.cc-feishu"
         assert Path(cfg).exists()
 
-def test_resolve_config_path_resumes_existing():
+def test_resolve_config_path_resumes_existing(monkeypatch):
     """If .cc-feishu/config.yaml exists, returns it (auto-resume)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = str(Path(tmpdir).resolve())
@@ -23,7 +24,7 @@ def test_resolve_config_path_resumes_existing():
         cfg_file = cc_dir / "config.yaml"
         cfg_file.write_text("feishu:\n  app_id: test\n")
 
-        os.chdir(tmpdir)
+        monkeypatch.chdir(tmpdir)
         from src.config import resolve_config_path
         cfg, data_dir = resolve_config_path()
 
