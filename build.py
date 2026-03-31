@@ -32,6 +32,7 @@ HIDDEN_IMPORTS = [
     "src.install.qr",
     "src.install.flow",
     "qrcode",
+    "qrcode_terminal",
     "PIL",
 ]
 

@@ -120,6 +120,9 @@ def main():
         level=args.log_level,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+    # Suppress verbose httpx INFO logs
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("qrcode").setLevel(logging.WARNING)
 
     if detect_config(args.config):
         logger.info(f"Config found at {args.config}, starting server...")
