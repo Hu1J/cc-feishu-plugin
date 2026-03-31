@@ -120,9 +120,16 @@ def main():
     )
     args = parser.parse_args()
 
+    log_path = Path("data") / "cc-feishu-bridge.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
     logging.basicConfig(
         level=args.log_level,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        handlers=[
+            logging.FileHandler(log_path),
+            logging.StreamHandler(),
+        ],
     )
     # Suppress verbose httpx INFO logs
     logging.getLogger("httpx").setLevel(logging.WARNING)
