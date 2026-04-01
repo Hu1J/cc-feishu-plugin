@@ -75,10 +75,10 @@ def save_config(result: AppRegistrationResult, config_path: str) -> None:
         "claude": {
             "cli_path": "claude",
             "max_turns": 50,
-            "approved_directory": str(Path(config_path).resolve().parent),
+            "approved_directory": str(Path(config_path).resolve().parent.parent),
         },
         "storage": {
-            "db_path": "./data/sessions.db",
+            "db_path": str(Path(config_path).resolve().parent / "sessions.db"),
         },
         "server": {
             "host": "0.0.0.0",
