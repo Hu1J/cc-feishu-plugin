@@ -18,19 +18,19 @@ SPEC_DIR = Path("build")
 DIST_DIR = Path("dist")
 
 
-# Hidden imports needed because we use dynamic imports inside src/
+# Hidden imports needed because we use dynamic imports inside cc_feishu_bridge/
 HIDDEN_IMPORTS = [
-    "src.config",
-    "src.feishu.client",
-    "src.feishu.message_handler",
-    "src.security.auth",
-    "src.security.validator",
-    "src.claude.integration",
-    "src.claude.session_manager",
-    "src.format.reply_formatter",
-    "src.install.api",
-    "src.install.qr",
-    "src.install.flow",
+    "cc_feishu_bridge.config",
+    "cc_feishu_bridge.feishu.client",
+    "cc_feishu_bridge.feishu.message_handler",
+    "cc_feishu_bridge.security.auth",
+    "cc_feishu_bridge.security.validator",
+    "cc_feishu_bridge.claude.integration",
+    "cc_feishu_bridge.claude.session_manager",
+    "cc_feishu_bridge.format.reply_formatter",
+    "cc_feishu_bridge.install.api",
+    "cc_feishu_bridge.install.qr",
+    "cc_feishu_bridge.install.flow",
     "qrcode",
     "qrcode_terminal",
     "PIL",
