@@ -12,15 +12,15 @@ import signal
 import sys
 from pathlib import Path
 
-from src.config import load_config, resolve_config_path
-from src.feishu.client import FeishuClient, IncomingMessage
-from src.feishu.ws_client import FeishuWSClient
-from src.feishu.message_handler import MessageHandler
-from src.security.auth import Authenticator
-from src.security.validator import SecurityValidator
-from src.claude.integration import ClaudeIntegration
-from src.claude.session_manager import SessionManager
-from src.format.reply_formatter import ReplyFormatter
+from cc_feishu_bridge.config import load_config, resolve_config_path
+from cc_feishu_bridge.feishu.client import FeishuClient, IncomingMessage
+from cc_feishu_bridge.feishu.ws_client import FeishuWSClient
+from cc_feishu_bridge.feishu.message_handler import MessageHandler
+from cc_feishu_bridge.security.auth import Authenticator
+from cc_feishu_bridge.security.validator import SecurityValidator
+from cc_feishu_bridge.claude.integration import ClaudeIntegration
+from cc_feishu_bridge.claude.session_manager import SessionManager
+from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 
 import logging
 
@@ -193,7 +193,7 @@ def detect_config() -> bool:
 
 async def interactive_install() -> tuple[str, str]:
     """Run the QR-code install flow. Returns (cfg_path, data_dir) on success."""
-    from src.install.flow import run_install_flow
+    from cc_feishu_bridge.install.flow import run_install_flow
     cfg_path, data_dir = resolve_config_path()
     await run_install_flow(cfg_path)
     return cfg_path, data_dir
