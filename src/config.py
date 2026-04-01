@@ -102,20 +102,45 @@ def save_config(path: str, feishu_app_id: str, feishu_app_secret: str,
         yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
 
 
+README_CONTENT = """# .cc-feishu-bridge
+
+This directory is created automatically by `cc-feishu-bridge` and contains all runtime data for this instance.
+
+## Contents
+
+- `config.yaml` — Bot credentials and configuration
+- `sessions.db` — SQLite database of user sessions and conversation history
+- `cc-feishu-bridge.log` — Runtime log file
+- `cc-feishu-bridge.pid` — PID file (process management)
+
+## Multi-instance Isolation
+
+Running `cc-feishu-bridge` in different working directories creates independent bot instances,
+each with its own config, sessions, and logs. This is the intended design.
+
+## Git Ignore
+
+This directory is gitignored. It should never be committed.
+
+"""
+
+
 def resolve_config_path() -> tuple[str, str]:
     """Resolve config and data directories relative to cwd.
 
-    Uses .cc-feishu/ subdirectory in the current working directory
+    Uses .cc-feishu-bridge/ subdirectory in the current working directory
     for natural multi-instance isolation:
-      - Config: {cwd}/.cc-feishu/config.yaml
-      - Data:  {cwd}/.cc-feishu/ (sessions.db, logs)
+      - Config: {cwd}/.cc-feishu-bridge/config.yaml
+      - Data:  {cwd}/.cc-feishu-bridge/ (sessions.db, logs, cc-feishu-bridge.pid)
 
-    Auto-creates .cc-feishu/ if not found (runs install flow on first start).
+    Auto-creates .cc-feishu-bridge/ if not found (runs install flow on first start).
     """
     import os
     cwd = os.getcwd()
-    cc_dir = Path(cwd).resolve() / ".cc-feishu"
+    cc_dir = Path(cwd).resolve() / ".cc-feishu-bridge"
     cc_dir.mkdir(exist_ok=True)
     cfg_path = cc_dir / "config.yaml"
     cfg_path.touch(exist_ok=True)
+    readme_path = cc_dir / "README.md"
+    readme_path.write_text(README_CONTENT, errors="replace")
     return (str(cfg_path), str(cc_dir))

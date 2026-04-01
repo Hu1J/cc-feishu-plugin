@@ -1,6 +1,6 @@
 """CLI entry point — starts WebSocket long connection to Feishu.
 
-Data is stored in .cc-feishu/ subdirectory of the current working directory,
+Data is stored in .cc-feishu-bridge/ subdirectory of the current working directory,
 enabling natural multi-instance isolation.
 """
 from __future__ import annotations
@@ -104,17 +104,17 @@ def start_bridge(config_path: str, data_dir: str) -> None:
 
 
 def list_bridges() -> None:
-    """List all cc-feishu-bridge instances by scanning .cc-feishu/*.pid files."""
+    """List all cc-feishu-bridge instances by scanning .cc-feishu-bridge/*.pid files."""
     print("\nRunning cc-feishu-bridge instances:")
     print(f"{'PID':<8} {'Directory':<40} {'PID File':<50}")
     print("-" * 100)
 
     found = False
     for root, dirs, files in os.walk("."):
-        # Only look in .cc-feishu directories
-        if ".cc-feishu" not in dirs:
+        # Only look in .cc-feishu-bridge directories
+        if ".cc-feishu-bridge" not in dirs:
             continue
-        cc_dir = os.path.join(root, ".cc-feishu")
+        cc_dir = os.path.join(root, ".cc-feishu-bridge")
         pid_file = os.path.join(cc_dir, "cc-feishu-bridge.pid")
         if not os.path.exists(pid_file):
             continue
@@ -146,7 +146,7 @@ def stop_bridge(pid: int) -> None:
 
 
 def detect_config() -> bool:
-    """Check if .cc-feishu/config.yaml exists and is non-empty."""
+    """Check if .cc-feishu-bridge/config.yaml exists and is non-empty."""
     cfg, _ = resolve_config_path()
     p = Path(cfg)
     return p.exists() and p.stat().st_size > 0
@@ -162,7 +162,7 @@ async def interactive_install() -> tuple[str, str]:
 
 def main(args=None):
     parser = argparse.ArgumentParser(
-        description="Claude Code Feishu Bridge — data stored in .cc-feishu/"
+        description="Claude Code Feishu Bridge — data stored in .cc-feishu-bridge/"
     )
     parser.add_argument(
         "--log-level",
