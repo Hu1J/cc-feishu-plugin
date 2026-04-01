@@ -96,13 +96,16 @@ without asking for permission each time.
 Do you understand and accept these risks? (yes/no): """
 
 
-def confirm_risk_warning() -> bool:
-    """Show risk warning and get user confirmation. Returns True only on 'yes'."""
+def confirm_risk_warning(config_path: str) -> bool:
+    """Show risk warning and get user confirmation. Saves acceptance to config on 'yes'."""
+    from cc_feishu_bridge.config import accept_bypass_warning
     print(RISK_WARNING)
     while True:
         try:
             response = input().strip().lower()
             if response in ("yes", "y"):
+                accept_bypass_warning(config_path)
+                print("已记录，下次启动将不再提示。")
                 return True
             elif response in ("no", "n", ""):
                 print("Cancelled — not starting the bridge.")
@@ -251,9 +254,18 @@ def main(args=None):
     else:
         cfg_path, data_dir = resolve_config_path()
 
-    # Risk warning must be acknowledged before starting
-    if not confirm_risk_warning():
-        return
+    # Risk warning must be acknowledged before starting (skip if already accepted)
+    if is_installed:
+        from cc_feishu_bridge.config import load_config
+        config = load_config(cfg_path)
+        if config.bypass_accepted:
+            logger.info("Bypass warning already accepted, skipping.")
+        else:
+            if not confirm_risk_warning(cfg_path):
+                return
+    else:
+        if not confirm_risk_warning(cfg_path):
+            return
 
     # Set up logging to file
     log_file = os.path.join(data_dir, "cc-feishu-bridge.log")

@@ -57,7 +57,7 @@ async def run_install_flow(config_path: str = "config.yaml") -> AppRegistrationR
     return result
 
 
-def save_config(result: AppRegistrationResult, config_path: str) -> None:
+def save_config(result: AppRegistrationResult, config_path: str, bypass_accepted: bool = False) -> None:
     """Write the app credentials and defaults to config.yaml."""
     config = {
         "feishu": {
@@ -82,6 +82,7 @@ def save_config(result: AppRegistrationResult, config_path: str) -> None:
             "port": 8080,
             "webhook_path": "/feishu/webhook",
         },
+        "bypass_accepted": bypass_accepted,
     }
 
     Path(config_path).parent.mkdir(parents=True, exist_ok=True)

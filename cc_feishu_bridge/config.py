@@ -48,6 +48,7 @@ class Config:
     storage: StorageConfig
     server: ServerConfig
     data_dir: str = ""
+    bypass_accepted: bool = False
 
 
 def load_config(path: str, data_dir: str = "") -> Config:
@@ -62,6 +63,7 @@ def load_config(path: str, data_dir: str = "") -> Config:
         storage=StorageConfig(**raw.get("storage", {})),
         server=ServerConfig(**raw.get("server", {})),
         data_dir=data_dir,
+        bypass_accepted=raw.get("bypass_accepted", False),
     )
 
 
@@ -71,7 +73,8 @@ def save_config(path: str, feishu_app_id: str, feishu_app_secret: str,
                 claude_cli_path: str, claude_max_turns: int,
                 claude_approved_directory: str,
                 storage_db_path: str,
-                server_host: str, server_port: int, server_webhook_path: str) -> None:
+                server_host: str, server_port: int, server_webhook_path: str,
+                bypass_accepted: bool = False) -> None:
     """Save a complete config to a YAML file."""
     config = {
         "feishu": {
@@ -96,10 +99,20 @@ def save_config(path: str, feishu_app_id: str, feishu_app_secret: str,
             "port": server_port,
             "webhook_path": server_webhook_path,
         },
+        "bypass_accepted": bypass_accepted,
     }
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+
+
+def accept_bypass_warning(config_path: str) -> None:
+    """Record that the bypass permissions risk warning has been accepted."""
+    with open(config_path) as f:
+        raw = yaml.safe_load(f)
+    raw["bypass_accepted"] = True
+    with open(config_path, "w") as f:
+        yaml.dump(raw, f, default_flow_style=False, allow_unicode=True)
 
 
 README_CONTENT = """# .cc-feishu-bridge
