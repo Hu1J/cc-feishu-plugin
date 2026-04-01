@@ -25,10 +25,12 @@ class FeishuClient:
         app_id: str,
         app_secret: str,
         bot_name: str = "Claude",
+        data_dir: str = "",
     ):
         self.app_id = app_id
         self.app_secret = app_secret
         self.bot_name = bot_name
+        self.data_dir = data_dir
         self._client = None
 
     def _get_client(self):
@@ -119,6 +121,90 @@ class FeishuClient:
             )
         except Exception:
             pass
+
+    async def download_media(self, message_id: str, file_key: str, msg_type: str = "image") -> bytes:
+        """Download media (image/file) from a Feishu message."""
+        import io
+        import lark_oapi as lark
+        client = self._get_client()
+        request = (
+            lark.im.v1.GetMessageResourceRequest.builder()
+            .message_id(message_id)
+            .file_key(file_key)
+            .type(msg_type)
+            .build()
+        )
+        try:
+            response = await asyncio.to_thread(client.im.v1.message_resource.get, request)
+            if not response.success():
+                raise RuntimeError(f"Failed to download media: {response.msg}")
+            return response.data.file.getvalue()
+        except Exception as e:
+            logger.error(f"download_media error: {e}")
+            raise
+
+    async def upload_image(self, image_bytes: bytes, image_type: str = "message") -> str:
+        """Upload an image to Feishu and return the image_key."""
+        import io
+        import lark_oapi as lark
+        client = self._get_client()
+        request = (
+            lark.im.v1.CreateImageRequest.builder()
+            .request_body(
+                lark.im.v1.CreateImageRequestBody.builder()
+                .image(io.BytesIO(image_bytes))
+                .image_type(image_type)
+                .build()
+            )
+            .build()
+        )
+        try:
+            response = await asyncio.to_thread(client.im.v1.image.create, request)
+            if not response.success():
+                raise RuntimeError(f"Failed to upload image: {response.msg}")
+            logger.info(f"Uploaded image: {response.data.image_key}")
+            return response.data.image_key
+        except Exception as e:
+            logger.error(f"upload_image error: {e}")
+            raise
+
+    async def send_image(self, chat_id: str, image_key: str) -> str:
+        """Send an image message to a Feishu chat."""
+        import json
+        import lark_oapi as lark
+        client = self._get_client()
+        request = (
+            lark.im.v1.CreateMessageRequest.builder()
+            .receive_id_type("chat_id")
+            .request_body(
+                lark.im.v1.CreateMessageRequestBody.builder()
+                .receive_id(chat_id)
+                .content(json.dumps({"image_key": image_key}))
+                .msg_type("image")
+                .build()
+            )
+            .build()
+        )
+        try:
+            response = await asyncio.to_thread(client.im.v1.message.create, request)
+            if not response.success():
+                raise RuntimeError(f"Failed to send image: {response.msg}")
+            logger.info(f"Sent image to {chat_id}: {response.data.message_id}")
+            return response.data.message_id
+        except Exception as e:
+            logger.error(f"send_image error: {e}")
+            raise
+
+    def _extract_file_info(self, content_str: str) -> tuple[str, str]:
+        """Extract original filename and file_type from file message content."""
+        import json
+        try:
+            content = json.loads(content_str)
+            name = content.get("file_name", "file")
+            ftype = content.get("file_type", "bin")
+            return name, ftype
+        except Exception:
+            return "file", "bin"
 
     def parse_incoming_message(self, body: dict) -> IncomingMessage | None:
         """Parse webhook payload into IncomingMessage."""
