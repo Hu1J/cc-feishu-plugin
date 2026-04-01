@@ -10,6 +10,8 @@ on:
         description: "Version tag (e.g. v0.2.0)"
         required: false
         type: string
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -94,6 +96,23 @@ jobs:
           name: cc-feishu-bridge-whl
           path: dist/*.whl
           retention-days: 30
+
+  # --- Publish whl to PyPI via Trusted Publishing ---
+  publish-whl:
+    needs: [build-whl]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download whl artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cc-feishu-bridge-whl
+          path: dist/
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
 
   # --- Create GitHub Release ---
   release:

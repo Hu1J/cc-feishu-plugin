@@ -2,6 +2,13 @@
 
 Claude Code 飞书桥接插件 — 在飞书中与本地 Claude Code 对话。
 
+## 核心特性
+
+**工作目录即 Claude 的工作目录。** 在哪个目录下启动 `cc-feishu-bridge`，Claude 就在哪个目录下工作。这意味着：
+
+- 可以同时运行多个实例（多开），每个实例对应不同的飞书机器人、不同的 Claude 工作目录
+- 例如在 `/project-A` 启动一个机器人，在 `/project-B` 启动另一个机器人，两者互不干扰
+
 ## 快速开始
 
 ### 方式一：直接运行编译好的 CLI（推荐）
@@ -41,7 +48,7 @@ cc-feishu-bridge.exe
 ### 方式二：pip 安装
 
 ```bash
-pip install cc-feishu-bridge-x.x.x-py3-none-any.whl
+pip install cc-feishu-bridge
 cc-feishu-bridge
 ```
 
@@ -101,10 +108,23 @@ cc-feishu-bridge
 
 机器人启动后，在飞书中向机器人发送消息即可与 Claude Code 对话。
 
+### 多开实例
+
+在不同目录下启动 `cc-feishu-bridge`，即可同时运行多个机器人实例，每个实例有独立的工作目录和配置文件：
+
+```bash
+cd /path/to/project-A && cc-feishu-bridge  # 机器人 A 在 /path/to/project-A 下工作
+cd /path/to/project-B && cc-feishu-bridge  # 机器人 B 在 /path/to/project-B 下工作
+```
+
 ### 命令
 
 - `/new` — 创建新会话
 - `/status` — 查看当前会话状态
+
+## 安全说明
+
+`cc-feishu-bridge` 以 **bypassPermissions 模式**运行，Claude Code 可执行任意终端命令、读写本地文件，无需每次授权确认。请仅在可信任的网络环境下使用。
 
 ## 获取帮助
 
