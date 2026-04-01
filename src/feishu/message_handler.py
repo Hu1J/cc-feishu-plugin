@@ -106,6 +106,7 @@ class MessageHandler:
             for chunk in chunks:
                 await self._safe_send(message.chat_id, chunk)
 
+            logger.info(f"Replied to {message.user_open_id} in chat {message.chat_id}")
             return HandlerResult(success=True)
 
         except Exception as e:
