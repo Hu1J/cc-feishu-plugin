@@ -66,7 +66,10 @@ class MessageHandler:
         # Use SDK's session ID if available, so Claude can maintain context
         sdk_session_id = session.sdk_session_id if session else None
 
-        # 5. Call Claude
+        # 5. Send typing indicator
+        typing_task = asyncio.create_task(self.feishu.send_typing(message.chat_id))
+
+        # 6. Call Claude
         try:
             async def stream_callback(claude_msg):
                 if claude_msg.tool_name:
@@ -83,7 +86,7 @@ class MessageHandler:
                 on_stream=stream_callback,
             )
 
-            # 6. Save session
+            # 7. Save session
             if not session:
                 session = self.sessions.create_session(
                     message.user_open_id,
@@ -96,7 +99,7 @@ class MessageHandler:
                 if new_session_id:
                     self.sessions.update_sdk_session_id(session.session_id, new_session_id)
 
-            # 7. Format and send response
+            # 8. Format and send response
             formatted = self.formatter.format_text(response)
             chunks = self.formatter.split_messages(formatted)
             for chunk in chunks:

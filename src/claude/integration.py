@@ -57,6 +57,10 @@ class ClaudeIntegration:
             if session_id:
                 options.continue_session = True
 
+            result_text = ""
+            result_session_id = session_id
+            result_cost = 0.0
+
             async with client:
                 async for event in await client.query(prompt=prompt, session_id=session_id):
                     if on_stream:
@@ -64,12 +68,17 @@ class ClaudeIntegration:
                         if msg:
                             await on_stream(msg)
 
-            # After client exits, get final result
-            result = await client.get_result()
+                # Get result inside the async with block before exiting
+                result = await client.get_result()
+                if result:
+                    result_text = result.result or ""
+                    result_session_id = result.session_id
+                    result_cost = result.total_cost_usd or 0.0
+
             return (
-                result.result or "",
-                result.session_id,
-                result.total_cost_usd or 0.0,
+                result_text,
+                result_session_id,
+                result_cost,
             )
 
         except ImportError:

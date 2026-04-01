@@ -61,6 +61,26 @@ class FeishuClient:
             raise RuntimeError(f"Failed to send message: {response.msg}")
         return response.data.message_id
 
+    async def send_typing(self, chat_id: str) -> str:
+        """Send a typing indicator to a chat. Returns message_id."""
+        import lark_oapi as lark
+        client = self._get_client()
+        request = (
+            lark.im.v1.CreateMessageRequest.builder()
+            .receive_id(chat_id)
+            .receive_id_type("chat_id")
+            .content(lark.NewHexText({"text": "", "type": "typing"}).to_json())
+            .msg_type("text")
+            .build()
+        )
+        response = await asyncio.to_thread(
+            client.im.v1.message.create,
+            request,
+        )
+        if not response.success():
+            raise RuntimeError(f"Failed to send typing: {response.msg}")
+        return response.data.message_id
+
     def parse_incoming_message(self, body: dict) -> IncomingMessage | None:
         """Parse webhook payload into IncomingMessage."""
         try:
