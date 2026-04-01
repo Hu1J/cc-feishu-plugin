@@ -88,6 +88,15 @@ class FeishuWSClient:
                 logger.exception(f"Error handling Feishu message: {e}")
 
         builder.register_p2_im_message_receive_v1(wrapped_handler)
+
+        # Register no-op handlers for reaction events (bot adding/removing emoji reactions).
+        # These events come back from Feishu but we don't need to act on them.
+        def noop_handler(event):
+            pass
+
+        builder.register_p2_im_message_reaction_created_v1(noop_handler)
+        builder.register_p2_im_message_reaction_deleted_v1(noop_handler)
+
         self._handler = builder.build()
         return self._handler
 
