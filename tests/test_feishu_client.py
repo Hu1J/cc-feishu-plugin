@@ -54,3 +54,27 @@ def test_parse_non_text_message():
     msg = client.parse_incoming_message(body)
     assert msg is not None
     assert msg.message_type == "image"
+
+
+def test_client_accepts_data_dir():
+    client = FeishuClient(app_id="cli_test", app_secret="secret", data_dir="/tmp/test")
+    assert client.data_dir == "/tmp/test"
+
+
+def test_client_data_dir_defaults_to_empty():
+    client = FeishuClient(app_id="cli_test", app_secret="secret")
+    assert client.data_dir == ""
+
+
+def test_extract_file_info():
+    client = FeishuClient(app_id="cli_test", app_secret="secret")
+    name, ftype = client._extract_file_info('{"file_name": "report", "file_type": "pdf"}')
+    assert name == "report"
+    assert ftype == "pdf"
+
+
+def test_extract_file_info_invalid_json():
+    client = FeishuClient(app_id="cli_test", app_secret="secret")
+    name, ftype = client._extract_file_info("not json")
+    assert name == "file"
+    assert ftype == "bin"

@@ -68,7 +68,7 @@ def sanitize_filename(name: str) -> str:
 def make_image_path(data_dir: str, message_id: str) -> str:
     """生成图片本地存储路径（不含扩展名）。"""
     ts = time.strftime("%Y%m%d_%H%M%S")
-    filename = f"img_{ts}_{message_id[:8]}"
+    filename = f"img_{ts}_{message_id}"
     images_dir = os.path.join(data_dir, "received_images")
     os.makedirs(images_dir, exist_ok=True)
     return os.path.join(images_dir, filename)
@@ -79,7 +79,7 @@ def make_file_path(data_dir: str, message_id: str, original_name: str, file_type
     ts = time.strftime("%Y%m%d_%H%M%S")
     safe_name = sanitize_filename(original_name) if original_name else "file"
     ext = mime_to_ext(file_type_to_mime(file_type))
-    filename = f"file_{ts}_{message_id[:8]}_{safe_name}{ext}"
+    filename = f"file_{ts}_{message_id}_{safe_name}{ext}"
     files_dir = os.path.join(data_dir, "received_files")
     os.makedirs(files_dir, exist_ok=True)
     return os.path.join(files_dir, filename)
@@ -87,5 +87,6 @@ def make_file_path(data_dir: str, message_id: str, original_name: str, file_type
 
 def save_bytes(path: str, data: bytes) -> None:
     """将字节写入文件。"""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         f.write(data)
