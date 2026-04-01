@@ -6,7 +6,7 @@ Claude Code 飞书桥接插件 — 在飞书中与本地 Claude Code 对话。
 
 ### 方式一：直接运行编译好的 CLI（推荐）
 
-下载对应平台的压缩包并解压即可使用：
+下载对应平台的压缩包并解压，然后将其加入系统 PATH 环境变量：
 
 | 平台 | 架构 | 下载文件 |
 |------|------|---------|
@@ -14,11 +14,26 @@ Claude Code 飞书桥接插件 — 在飞书中与本地 Claude Code 对话。
 | macOS | Intel (x86_64) | `cc-feishu-bridge-macos-x86_64` |
 | Windows | x86_64 | `cc-feishu-bridge-windows-x86_64.exe` |
 
-下载后添加执行权限（macOS/Linux）：
+**macOS / Linux：**
 
 ```bash
+# 下载并解压后，移入 PATH
 chmod +x cc-feishu-bridge-*
-./cc-feishu-bridge
+sudo mv cc-feishu-bridge-* /usr/local/bin/cc-feishu-bridge
+
+# 验证安装成功
+cc-feishu-bridge
+```
+
+**Windows：**
+
+1. 下载 `cc-feishu-bridge-windows-x86_64.exe` 并放到任意目录，例如 `C:\Program Files\cc-feishu-bridge\`
+2. 按 `Win + R` 输入 `sysdm.cpl` → 高级 → 环境变量
+3. 在用户变量或系统变量的 `Path` 中添加该目录路径
+4. 重新打开命令提示符验证：
+
+```cmd
+cc-feishu-bridge.exe
 ```
 
 首次运行会自动进入安装流程。
