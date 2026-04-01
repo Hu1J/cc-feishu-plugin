@@ -49,10 +49,14 @@ class FeishuClient:
         client = self._get_client()
         request = (
             lark.im.v1.CreateMessageRequest.builder()
-            .receive_id(chat_id)
             .receive_id_type("chat_id")
-            .content(lark.NewHexText({"text": text}).to_json())
-            .msg_type("text")
+            .request_body(
+                lark.im.v1.CreateMessageRequestBody.builder()
+                .receive_id(chat_id)
+                .content(lark.NewHexText({"text": text}).to_json())
+                .msg_type("text")
+                .build()
+            )
             .build()
         )
         response = await asyncio.to_thread(
@@ -69,10 +73,14 @@ class FeishuClient:
         client = self._get_client()
         request = (
             lark.im.v1.CreateMessageRequest.builder()
-            .receive_id(chat_id)
             .receive_id_type("chat_id")
-            .content(lark.NewHexText({"text": "", "type": "typing"}).to_json())
-            .msg_type("text")
+            .request_body(
+                lark.im.v1.CreateMessageRequestBody.builder()
+                .receive_id(chat_id)
+                .content(lark.NewHexText({"text": "", "type": "typing"}).to_json())
+                .msg_type("text")
+                .build()
+            )
             .build()
         )
         response = await asyncio.to_thread(

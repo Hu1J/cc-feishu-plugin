@@ -65,17 +65,18 @@ class ClaudeIntegration:
                 await client.query(prompt=prompt, session_id=session_id)
 
                 async for message in client.receive_response():
-                    if on_stream:
-                        msg = self._parse_message(message)
-                        if msg:
-                            await on_stream(msg)
+                    msg_type = type(message).__name__
 
-                # Get result inside the async with block before exiting
-                result = await client.get_result()
-                if result:
-                    result_text = result.result or ""
-                    result_session_id = result.session_id
-                    result_cost = result.total_cost_usd or 0.0
+                    # Extract result from final ResultMessage
+                    if msg_type == "ResultMessage":
+                        result_text = getattr(message, "result", "") or ""
+                        result_session_id = getattr(message, "session_id", session_id) or session_id
+                        result_cost = getattr(message, "total_cost_usd", 0.0) or 0.0
+
+                    if on_stream:
+                        parsed = self._parse_message(message)
+                        if parsed:
+                            await on_stream(parsed)
 
             return (
                 result_text,
@@ -113,7 +114,7 @@ class ClaudeIntegration:
                     )
 
         elif msg_type == "ResultMessage":
-            content = getattr(message, "result", "") or ""
-            return ClaudeMessage(content=content, is_final=True)
+            # Result is extracted separately; don't send through stream callback
+            return None
 
         return None
