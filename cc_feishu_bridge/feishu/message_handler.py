@@ -78,7 +78,10 @@ class MessageHandler:
                         claude_msg.tool_name,
                         claude_msg.tool_input,
                     )
+                    logger.info(f"[stream] tool: {claude_msg.tool_name}")
                     await self._safe_send(message.chat_id, tool_text)
+                elif claude_msg.content:
+                    logger.info(f"[stream] text: {claude_msg.content[:100]}")
 
             response, new_session_id, cost = await self.claude.query(
                 prompt=message.content,
@@ -106,7 +109,7 @@ class MessageHandler:
             for chunk in chunks:
                 await self._safe_send(message.chat_id, chunk)
 
-            logger.info(f"Replied to {message.user_open_id} in chat {message.chat_id}")
+            logger.info(f"Replied to {message.user_open_id} in chat {message.chat_id} | reply: {response[:300]}")
             return HandlerResult(success=True)
 
         except Exception as e:
