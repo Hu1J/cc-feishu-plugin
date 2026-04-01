@@ -83,7 +83,7 @@ class FeishuClient:
             .request_body(
                 lark.im.v1.CreateMessageReactionRequestBody.builder()
                 .reaction_type(
-                    lark.im.v1.ReactionType.builder()
+                    lark.im.v1.model.emoji.Emoji.builder()
                     .emoji_type("Typing")
                     .build()
                 )
