@@ -28,10 +28,6 @@ build-backend = "setuptools.build_meta"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 
-[tool.setuptools]
-# Exclude build scripts from wheel distribution
-exclude = ["run.py", "build.py"]
-
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["src*"]
