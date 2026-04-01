@@ -56,7 +56,7 @@ class ClaudeIntegration:
             client = ClaudeSDKClient(options=options)
 
             if session_id:
-                options.continue_session = True
+                options.continue_conversation = True
 
             result_text = ""
             result_session_id = session_id
