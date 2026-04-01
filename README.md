@@ -68,11 +68,11 @@ cc-feishu-bridge
 1. 使用飞书扫码授权
 2. 扫码完成后自动创建机器人并保存配置
 
-安装完成后配置文件位于 `~/.cc-feishu-bridge/config.yaml`。
+安装完成后配置文件位于 `.cc-feishu-bridge/config.yaml`（相对于启动目录）。
 
 ### 手动配置
 
-如果需要手动配置，复制 `config.example.yaml` 为 `~/.cc-feishu-bridge/config.yaml`：
+如果需要手动配置，复制 `config.example.yaml` 为 `.cc-feishu-bridge/config.yaml`（相对于启动目录）：
 
 ```yaml
 feishu:
@@ -90,7 +90,7 @@ claude:
   approved_directory: /path/to/workdir  # Claude 工作目录
 
 storage:
-  db_path: ~/.cc-feishu-bridge/sessions.db
+  db_path: .cc-feishu-bridge/sessions.db
 
 server:
   host: "0.0.0.0"
