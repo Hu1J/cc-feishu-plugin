@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
 
 from cc_feishu_bridge.feishu.client import FeishuClient, IncomingMessage
@@ -32,6 +33,7 @@ class MessageHandler:
         session_manager: SessionManager,
         formatter: ReplyFormatter,
         approved_directory: str,
+        data_dir: str = "",
     ):
         self.feishu = feishu_client
         self.auth = authenticator
@@ -40,6 +42,9 @@ class MessageHandler:
         self.sessions = session_manager
         self.formatter = formatter
         self.approved_directory = approved_directory
+        self.data_dir = data_dir
+        self._pending_images: list[tuple[str, str]] = []  # [(base64, mimeType), ...]
+        self._current_chat_id: str = ""  # for _on_stream access to chat_id
 
     async def handle(self, message: IncomingMessage) -> HandlerResult:
         """Main entry point for processing an incoming message."""
@@ -52,6 +57,13 @@ class MessageHandler:
         # 2. Handle commands
         if message.content.startswith("/"):
             return await self._handle_command(message)
+
+        # Handle non-text, non-media message types (audio, etc.)
+        if message.message_type not in ("text", "image", "file"):
+            return HandlerResult(
+                success=True,
+                response_text="暂不支持该消息类型，请发送文字消息。",
+            )
 
         # 3. Input validation
         ok, err = self.validator.validate(message.content)
@@ -70,8 +82,21 @@ class MessageHandler:
         # the official plugin uses a 'Typing' emoji reaction instead)
         reaction_id = await self.feishu.add_typing_reaction(message.message_id)
 
-        # 6. Call Claude
+        # 6. Preprocess media (image/file) before querying Claude
+        media_prompt_prefix = ""
+        if message.message_type in ("image", "file"):
+            try:
+                media_prompt_prefix = await self._preprocess_media(message)
+                if media_prompt_prefix:
+                    logger.info(f"Inbound media saved: {media_prompt_prefix}")
+            except Exception as e:
+                logger.warning(f"Failed to process inbound media: {e}")
+                media_prompt_prefix = ""
+
+        # 7. Call Claude
         try:
+            # Store chat_id for _on_stream to use
+            self._current_chat_id = message.chat_id
             async def stream_callback(claude_msg):
                 if claude_msg.tool_name:
                     tool_text = self.formatter.format_tool_call(
@@ -82,15 +107,23 @@ class MessageHandler:
                     await self._safe_send(message.chat_id, tool_text)
                 elif claude_msg.content:
                     logger.info(f"[stream] text: {claude_msg.content[:100]}")
+                elif claude_msg.image_data:
+                    self._pending_images.append((claude_msg.image_data, claude_msg.mime_type or "image/png"))
+                    logger.info(f"[stream] image collected (mime={claude_msg.mime_type})")
 
+            full_prompt = f"{media_prompt_prefix}\n{message.content}".strip() if media_prompt_prefix else message.content
             response, new_session_id, cost = await self.claude.query(
-                prompt=message.content,
+                prompt=full_prompt,
                 session_id=sdk_session_id,
                 cwd=session.project_path if session else self.approved_directory,
                 on_stream=stream_callback,
             )
 
-            # 7. Save session
+            # 8. Send any pending images from Claude's response
+            if self._pending_images:
+                await self._send_pending_images(message.chat_id)
+
+            # 9. Save session
             if not session:
                 session = self.sessions.create_session(
                     message.user_open_id,
@@ -103,7 +136,7 @@ class MessageHandler:
                 if new_session_id:
                     self.sessions.update_sdk_session_id(session.session_id, new_session_id)
 
-            # 8. Format and send response
+            # 10. Format and send text response
             formatted = self.formatter.format_text(response)
             chunks = self.formatter.split_messages(formatted)
             for chunk in chunks:
@@ -123,6 +156,7 @@ class MessageHandler:
 
     async def _handle_command(self, message: IncomingMessage) -> HandlerResult:
         """Handle slash commands like /new, /status."""
+        self._pending_images.clear()  # Ensure no residual images during command handling
         parts = message.content.split(maxsplit=1)
         cmd = parts[0].lower()
         arg = parts[1] if len(parts) > 1 else ""
@@ -167,3 +201,71 @@ class MessageHandler:
             await self.feishu.send_text(chat_id, text)
         except Exception as e:
             logger.warning(f"Failed to send message: {e}")
+
+    async def _preprocess_media(self, message: IncomingMessage) -> str:
+        """Download and save inbound media, return the text to prepend to prompt.
+
+        Returns:
+            空字符串（无媒体），或形如 "[图片: /path/to/img.png]" 的文本片段。
+        """
+        from cc_feishu_bridge.feishu.media import (
+            make_image_path,
+            make_file_path,
+            save_bytes,
+        )
+
+        if message.message_type not in ("image", "file"):
+            return ""
+
+        msg_id = message.message_id
+        content_str = message.content
+
+        try:
+            import json
+            content = json.loads(content_str)
+        except Exception:
+            return ""
+
+        data_dir = self.data_dir or os.getcwd()
+
+        if message.message_type == "image":
+            file_key = content.get("image_key", "")
+            if not file_key:
+                return ""
+            base_path = make_image_path(data_dir, msg_id)
+            data = await self.feishu.download_media(msg_id, file_key, msg_type="image")
+            # 飞书图片通常是 PNG，写入时直接加 .png
+            save_path = base_path + ".png"
+            save_bytes(save_path, data)
+            return f"[图片: {save_path}]"
+
+        elif message.message_type == "file":
+            file_key = content.get("file_key", "")
+            orig_name = content.get("file_name", "file")
+            file_type = content.get("file_type", "bin")
+            if not file_key:
+                return ""
+            save_path = make_file_path(data_dir, msg_id, orig_name, file_type)
+            data = await self.feishu.download_media(msg_id, file_key, msg_type="file")
+            save_bytes(save_path, data)
+            return f"[文件: {save_path}]"
+
+        return ""
+
+    async def _send_pending_images(self, chat_id: str) -> None:
+        """Send all pending images to the chat, one by one."""
+        import base64
+        for image_data, mime_type in self._pending_images:
+            try:
+                image_bytes = base64.b64decode(image_data)
+                image_key = await self.feishu.upload_image(image_bytes)
+                await self.feishu.send_image(chat_id, image_key)
+                logger.info(f"Sent outbound image to {chat_id}")
+            except Exception as e:
+                logger.warning(f"Failed to send image: {e}")
+                try:
+                    await self._safe_send(chat_id, "⚠️ 图片发送失败")
+                except Exception:
+                    pass
+
+        self._pending_images.clear()
