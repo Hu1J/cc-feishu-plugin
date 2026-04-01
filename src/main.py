@@ -152,13 +152,12 @@ def detect_config() -> bool:
     return p.exists() and p.stat().st_size > 0
 
 
-async def interactive_install() -> None:
-    """Run the QR-code install flow, then start bridge."""
+async def interactive_install() -> tuple[str, str]:
+    """Run the QR-code install flow. Returns (cfg_path, data_dir) on success."""
     from src.install.flow import run_install_flow
     cfg_path, data_dir = resolve_config_path()
     await run_install_flow(cfg_path)
-    # Install complete; start bridge in a fresh loop.
-    start_bridge(cfg_path, data_dir)
+    return cfg_path, data_dir
 
 
 def main(args=None):
@@ -218,7 +217,16 @@ def main(args=None):
         start_bridge(*resolve_config_path())
     else:
         logger.info("No config found, running install flow...")
-        asyncio.run(interactive_install())
+        cfg_path, data_dir = asyncio.run(interactive_install())
+        # Install complete; start bridge in a fresh process.
+        # Write log file first, then start blocking WS bridge.
+        log_file = os.path.join(data_dir, "cc-feishu-bridge.log")
+        Path(data_dir).mkdir(exist_ok=True)
+        fh = logging.FileHandler(log_file)
+        fh.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+        logging.getLogger().addHandler(fh)
+        logger.info("Install complete, starting bridge...")
+        start_bridge(cfg_path, data_dir)
 
 
 if __name__ == "__main__":
