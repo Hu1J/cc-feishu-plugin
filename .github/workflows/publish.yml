@@ -30,7 +30,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cc-feishu-bridge-whl
-          path: dist/
+          path: dist/*.whl
           retention-days: 1
 
   publish-whl:
@@ -47,7 +47,7 @@ jobs:
           path: dist/
 
       - name: List dist contents
-        run: ls -la dist/
+        run: ls -la dist/ && echo "Whl files:" && ls -la dist/*.whl
 
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
