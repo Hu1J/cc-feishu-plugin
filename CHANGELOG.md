@@ -6,7 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-<!-- Add new releases below this line. Maintainer updates before each tag. -->
+<!--
+发版流程：
+1. 在上方 [Unreleased] 区域填入本次变更内容
+2. 创建 tag：git tag vx.x.x && git push --tags
+3. GitHub Actions 自动读取本文件作为 Release 说明
+4. 发版完成后，将 [Unreleased] 内容移至正式版本块，日期填当天，清空 [Unreleased]
+-->
+
+<!-- Add new changes here before each release. Move to a version section below when tagging. -->
 
 ## [0.1.1] - 2026-04-02
 
