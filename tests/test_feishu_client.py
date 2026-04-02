@@ -89,7 +89,17 @@ def test_extract_file_info_invalid_json():
 def test_get_message_success():
     """get_message() should return message dict when API succeeds."""
     client = FeishuClient(app_id="cli_test", app_secret="secret")
-    mock_item = {"message_id": "om_123", "content": '{"text":"hello"}'}
+
+    # Simulate lark SDK Message object with msg_type, body.content, sender.id
+    mock_body = MagicMock()
+    mock_body.content = '{"text":"hello"}'
+    mock_sender = MagicMock()
+    mock_sender.id = "ou_123"
+    mock_item = MagicMock()
+    mock_item.msg_type = "text"
+    mock_item.body = mock_body
+    mock_item.sender = mock_sender
+
     mock_response = MagicMock()
     mock_response.success.return_value = True
     mock_response.data.items = [mock_item]
@@ -102,7 +112,9 @@ def test_get_message_success():
                 client.get_message("om_123")
             )
     assert result is not None
-    assert result["message_id"] == "om_123"
+    assert result["msg_type"] == "text"
+    assert result["content"] == '{"text":"hello"}'
+    assert result["sender_id"] == "ou_123"
 
 
 def test_get_message_failure_returns_none():

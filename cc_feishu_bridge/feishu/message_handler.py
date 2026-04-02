@@ -282,10 +282,11 @@ class MessageHandler:
                 try:
                     quoted_msg = await self.feishu.get_message(message.parent_id)
                     if quoted_msg:
-                        sender_name = quoted_msg.get("sender", {}).get("name", "")
+                        sender_id = quoted_msg.get("sender_id", "")
                         quoted_text = self._extract_quoted_content(quoted_msg)
-                        if sender_name:
-                            quoted_content = f"[引用消息: {message.parent_id}] {sender_name}: {quoted_text}"
+                        # Skip bot's own messages to avoid quoting itself
+                        if sender_id and sender_id.startswith("cli_"):
+                            quoted_content = ""  # Bot message — skip quoting to avoid loop
                         else:
                             quoted_content = f"[引用消息: {message.parent_id}] {quoted_text}"
                         logger.info(f"Quoted message {message.parent_id}: {quoted_text[:100]!r}")

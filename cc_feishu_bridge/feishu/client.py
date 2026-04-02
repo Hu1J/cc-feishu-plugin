@@ -73,7 +73,11 @@ class FeishuClient:
         return response.data.message_id
 
     async def get_message(self, message_id: str) -> dict | None:
-        """Fetch a message by ID. Returns message dict or None on failure."""
+        """Fetch a message by ID. Returns a plain dict or None on failure.
+
+        The returned dict has the shape:
+            {"msg_type": str, "content": str, "sender_id": str}
+        """
         import lark_oapi as lark
         client = self._get_client()
         request = (
@@ -85,9 +89,14 @@ class FeishuClient:
         if not response.success():
             logger.warning(f"get_message({message_id}) failed: {response.msg}")
             return None
-        if response.data and response.data.items:
-            return response.data.items[0]
-        return None
+        if not (response.data and response.data.items):
+            return None
+        item = response.data.items[0]
+        return {
+            "msg_type": item.msg_type,
+            "content": item.body.content if item.body else "",
+            "sender_id": item.sender.id if item.sender else "",
+        }
 
     async def add_typing_reaction(self, message_id: str) -> str | None:
         """Add a typing emoji reaction to a message (Feishu typing indicator).
