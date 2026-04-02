@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 import httpx
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -185,16 +188,18 @@ class FeishuInstallAPI:
         Uses HTTP Basic Auth (app_id:app_secret) per RFC 8628 and Feishu's
         device authorization endpoint requirements. The client_secret is NOT
         sent in the request body — only client_id + scope.
-        Appends offline_access so the token response includes a refresh_token.
+        Only requests offline_access; other user-level scopes are determined by
+        the app's configuration in the Feishu developer console, not by this call.
         """
         import base64
         client = await self._get_client()
         credentials = base64.b64encode(
             f"{self.app_id}:{self.app_secret}".encode()
         ).decode()
-        scope_str = " ".join(scopes)
-        if "offline_access" not in scope_str:
-            scope_str = (scope_str + " offline_access") if scope_str else "offline_access"
+        # Only request offline_access; app-specific scopes are controlled via the
+        # Feishu developer console, not the device auth request. This avoids
+        # "invalid_scope" when the app hasn't enabled those permissions.
+        scope_str = "offline_access"
         resp = await client.post(
             self._accounts_url("/oauth/v1/device_authorization"),
             data={
@@ -206,6 +211,7 @@ class FeishuInstallAPI:
                 "Authorization": f"Basic {credentials}",
             },
         )
+        logger.info(f"[device_auth_begin] status={resp.status_code} body={resp.text[:200]}")
         resp.raise_for_status()
         data = resp.json()
         if data.get("error"):

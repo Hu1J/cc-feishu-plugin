@@ -537,7 +537,6 @@ class FeishuClient:
             .request_body(
                 lark.im.v1.PatchMessageRequestBody.builder()
                 .content(json.dumps(card))
-                .msg_type("interactive")
                 .build()
             )
             .build()

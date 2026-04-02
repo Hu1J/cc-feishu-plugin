@@ -1,12 +1,23 @@
 """Build Feishu interactive card payloads for auth flow."""
 from __future__ import annotations
 
-import json
+
+def _to_inapp_web_url(target_url: str) -> str:
+    """Wrap a URL in Feishu's in-app web viewer for better mobile experience."""
+    import urllib.parse
+    lk_meta = urllib.parse.quote(
+        '{"page-meta":{"showNavBar":"false","showBottomNavBar":"false"}}'
+    )
+    sep = "&" if "?" in target_url else "?"
+    full_url = f"{target_url}{sep}lk_meta={lk_meta}"
+    encoded = urllib.parse.quote(full_url, safe="")
+    return f"https://applink.feishu.cn/client/web_url/open?mode=sidebar-semi&max_width=800&reload=false&url={encoded}"
 
 
 def _card_payload(header_title: str, header_template: str, body_elements: list) -> dict:
     return {
-        "config": {"wide_screen_mode": False},
+        "schema": "2.0",
+        "config": {"wide_screen_mode": True},
         "header": {
             "title": {"tag": "plain_text", "content": header_title},
             "template": header_template,
@@ -17,6 +28,7 @@ def _card_payload(header_title: str, header_template: str, body_elements: list) 
 
 def make_auth_card(verification_url: str, user_code: str, expires_minutes: int = 5) -> dict:
     """Build the pending auth card sent to the user immediately after /feishu auth."""
+    inapp_url = _to_inapp_web_url(verification_url)
     return _card_payload(
         header_title="📋 授权 cc-feishu-bridge",
         header_template="blue",
@@ -25,16 +37,17 @@ def make_auth_card(verification_url: str, user_code: str, expires_minutes: int =
                 "tag": "markdown",
                 "content": (
                     f"**授权码：** `{user_code}`\n\n"
-                    f"请在下方点击 **「前往授权」（{verification_url}）**，完成飞书授权后返回此处。\n"
+                    f"请在下方点击 **「前往授权」**，完成飞书授权后返回此处。\n"
                     f"链接将在 **{expires_minutes} 分钟** 后过期。\n\n"
                     "授权后机器人可执行文件上传等操作。"
                 ),
+                "text_size": "normal",
             },
             {
                 "tag": "column_set",
                 "flex_mode": "none",
                 "horizontal_align": "right",
-                "elements": [
+                "columns": [
                     {
                         "tag": "column",
                         "width": "auto",
@@ -44,11 +57,21 @@ def make_auth_card(verification_url: str, user_code: str, expires_minutes: int =
                                 "text": {"tag": "plain_text", "content": "前往授权"},
                                 "type": "primary",
                                 "size": "medium",
-                                "multi_url": {"url": verification_url},
+                                "multi_url": {
+                                    "url": inapp_url,
+                                    "pc_url": inapp_url,
+                                    "android_url": inapp_url,
+                                    "ios_url": inapp_url,
+                                },
                             }
                         ],
                     }
                 ],
+            },
+            {
+                "tag": "markdown",
+                "content": f"<font color='grey'>授权链接将在 {expires_minutes} 分钟后失效，届时需重新发起</font>",
+                "text_size": "notation",
             },
         ],
     )
