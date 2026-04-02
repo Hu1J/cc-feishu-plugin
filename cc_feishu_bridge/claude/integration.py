@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from dataclasses import dataclass
 from typing import Any, Callable, Awaitable, Optional
 
@@ -26,7 +27,14 @@ class ClaudeIntegration:
         max_turns: int = 50,
         approved_directory: str | None = None,
     ):
-        self.cli_path = cli_path
+        # Resolve "claude" to its absolute path so the subprocess spawned by the SDK
+        # doesn't have to rely on PATH resolution (avoids issues on Windows where
+        # npm's claude.cmd may not be found by anyio.open_process).
+        if cli_path == "claude":
+            resolved = shutil.which("claude")
+            self.cli_path = resolved if resolved else cli_path
+        else:
+            self.cli_path = cli_path
         self.max_turns = max_turns
         self.approved_directory = approved_directory
         self._active_client: Optional[Any] = None

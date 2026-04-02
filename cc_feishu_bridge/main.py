@@ -417,16 +417,15 @@ def main(args=None):
 
     args = parser.parse_args(args)
 
-    logging.basicConfig(
-        level=args.log_level,
-        format="%(asctime)s %(levelname)s %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
-    logging.getLogger().handlers[0].setFormatter(ColoredFormatter(
-        "%(asctime)s %(levelname)s %(message)s"
-    ))
+    _stdout_handler = logging.StreamHandler(sys.stdout)
+    try:
+        _stdout_handler.stream.reconfigure(encoding="utf-8")  # type: ignore
+    except (AttributeError, TypeError):
+        pass  # fallback for older Python or non-seekable streams
+    _stdout_handler.setLevel(args.log_level)
+    _stdout_handler.setFormatter(ColoredFormatter("%(asctime)s %(levelname)s %(message)s"))
+    logging.root.addHandler(_stdout_handler)
+    logging.root.setLevel(args.log_level)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("qrcode").setLevel(logging.WARNING)
 
