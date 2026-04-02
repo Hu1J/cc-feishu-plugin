@@ -184,39 +184,6 @@ def _claude_available(cli_path: str) -> bool:
     return shutil.which("claude") is not None
 
 
-def _notify_claude_missing(config, data_dir: str, feishu) -> None:
-    """Send a Feishu message about missing Claude Code to the last active chat."""
-    # Try to get the last active chat to notify the user
-    db_path = os.path.join(data_dir, "sessions.db")
-    try:
-        from cc_feishu_bridge.claude.session_manager import SessionManager
-        sm = SessionManager(db_path=db_path)
-        session = sm.get_active_session_by_chat_id()
-        chat_id = session.chat_id if session else None
-    except Exception:
-        chat_id = None
-
-    if not chat_id:
-        logger.warning("Claude Code not found and no active chat to notify — user will see errors in Feishu")
-        return
-
-    notifier_update_chat_id(chat_id)
-
-    msg = (
-        "⚠️ **Claude Code 未安装或不可用**\n\n"
-        "机器人无法连接 Claude，请先安装：\n\n"
-        "```bash\n# macOS / Linux\nnpm install -g @anthropic-ai/claude-code\n\n"
-        "# 验证安装\nclaude --version\n```\n\n"
-        "安装完成后重新发送消息即可。"
-    )
-
-    try:
-        import asyncio
-        asyncio.run(feishu.send_post_reply(chat_id=chat_id, content=msg, log_reply=False))
-    except Exception as e:
-        logger.warning(f"Failed to send Claude-not-found notification: {e}")
-
-
 def start_bridge(config_path: str, data_dir: str) -> None:
     """Start the bridge: load config and run WebSocket connection."""
     # Acquire exclusive lock before starting — prevents multiple instances in the same directory
@@ -254,12 +221,20 @@ def start_bridge(config_path: str, data_dir: str) -> None:
 
     logger.info(f"Starting Feishu bridge (WS mode) — data: {data_dir}")
 
+    # Check Claude Code CLI availability before connecting — fail fast with a clear message
+    if not _claude_available(config.claude.cli_path):
+        print()
+        print("❌ Claude Code 未安装或不可用，bridge 无法启动。")
+        print()
+        print("请先安装 Claude Code：")
+        print("  npm install -g @anthropic-ai/claude-code")
+        print()
+        print("安装完成后重新运行 cc-feishu-bridge 即可。")
+        print()
+        sys.exit(1)
+
     # Auto-install Claude skill for file sending
     ensure_skill_installed()
-
-    # Check if Claude Code CLI is available
-    if not _claude_available(config.claude.cli_path):
-        _notify_claude_missing(config, data_dir, handler._feishu)
 
     # Create media subdirectories
     for sub in ("received_images", "received_files"):

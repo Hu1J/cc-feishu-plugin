@@ -114,6 +114,7 @@ class MessageHandler:
         self._queue: asyncio.Queue[IncomingMessage] | None = None
         self._queue_loop_id: int | None = None
         self._worker_task: asyncio.Task | None = None
+        self._is_processing: bool = False  # True while worker is running or about to run
         self._current_message_id: str = ""
 
     def _get_queue(self) -> asyncio.Queue[IncomingMessage]:
@@ -152,31 +153,41 @@ class MessageHandler:
         await queue.put(message)
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = asyncio.create_task(self._worker_loop())
+            # Set _is_processing immediately (before the coroutine even runs) so that
+            # a concurrent /stop command sees it as True and can interrupt correctly.
+            try:
+                loop = asyncio.get_running_loop()
+                loop.call_soon(lambda: setattr(self, "_is_processing", True))
+            except RuntimeError:
+                pass
         return HandlerResult(success=True)
 
     async def _worker_loop(self) -> None:
         """串行出队并处理消息。"""
-        while True:
-            try:
-                queue = self._get_queue()
-                message = await queue.get()
+        try:
+            while True:
                 try:
-                    self._current_message_id = message.message_id
-                    await self._process_message(message)
-                finally:
-                    self._current_message_id = ""
-                    queue.task_done()
-            except asyncio.CancelledError:
-                break
-            except RuntimeError as e:
-                # Queue bound to a different event loop (e.g., after test teardown) — exit silently.
-                # Only swallow the specific queue/loop errors; re-raise everything else.
-                err_msg = str(e)
-                if "different event loop" in err_msg or "Event loop is closed" in err_msg:
+                    queue = self._get_queue()
+                    message = await queue.get()
+                    try:
+                        self._current_message_id = message.message_id
+                        await self._process_message(message)
+                    finally:
+                        self._current_message_id = ""
+                        queue.task_done()
+                except asyncio.CancelledError:
                     break
-                raise  # re-raise unknown RuntimeError
-            except Exception:
-                logger.exception("Worker loop error")
+                except RuntimeError as e:
+                    # Queue bound to a different event loop (e.g., after test teardown) — exit silently.
+                    # Only swallow the specific queue/loop errors; re-raise everything else.
+                    err_msg = str(e)
+                    if "different event loop" in err_msg or "Event loop is closed" in err_msg:
+                        break
+                    raise  # re-raise unknown RuntimeError
+                except Exception:
+                    logger.exception("Worker loop error")
+        finally:
+            self._is_processing = False
 
     async def _process_message(self, message: IncomingMessage) -> None:
         """处理单条消息：鉴权 → 媒体预处理 → 引用检测 → 查询。"""
@@ -243,14 +254,15 @@ class MessageHandler:
         elif cmd == "/stop":
             return await self._handle_stop(message)
 
-        elif cmd == "/feishu":
+        elif cmd == "/help":
             return HandlerResult(
                 success=True,
                 response_text=(
                     "cc-feishu-bridge 命令：\n"
                     "• /new — 新建会话\n"
                     "• /status — 会话状态\n"
-                    "• /stop — 打断当前查询"
+                    "• /stop — 打断当前查询\n"
+                    "• /help — 显示本帮助"
                 ),
             )
 
@@ -399,7 +411,7 @@ class MessageHandler:
 
     async def _handle_stop(self, message: IncomingMessage) -> HandlerResult:
         """Handle /stop — cancel the current worker task and interrupt Claude."""
-        if self._worker_task is None or self._worker_task.done():
+        if not self._is_processing:
             await self._safe_send(message.chat_id, message.message_id, "当前没有正在运行的查询。")
             return HandlerResult(success=True)
         await self.claude.interrupt_current()
