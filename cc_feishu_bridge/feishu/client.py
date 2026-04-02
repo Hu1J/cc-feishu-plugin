@@ -215,7 +215,6 @@ class FeishuClient:
             response = await asyncio.to_thread(client.im.v1.file.create, request)
             if not response.success():
                 logger.error(f"upload_file raw response: {response}")
-                logger.error(f"upload_file raw response: {response}")
                 raise RuntimeError(f"Failed to upload file: {response.msg}")
             logger.info(f"Uploaded file: {response.data.file_key} ({file_name})")
             return response.data.file_key
@@ -287,7 +286,9 @@ class FeishuClient:
             )
             .build()
         )
-        await asyncio.to_thread(client.im.v1.message.patch, request)
+        response = await asyncio.to_thread(client.im.v1.message.patch, request)
+        if not response.success():
+            raise RuntimeError(f"Failed to update message: {response.msg}")
 
     def _extract_file_info(self, content_str: str) -> tuple[str, str]:
         """Extract original filename and file_type from file message content."""
