@@ -82,6 +82,6 @@ jobs:
         with:
           files: dist/*
           body_path: CHANGELOG.md
-          draft: true
+          draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
