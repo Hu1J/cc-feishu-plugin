@@ -203,12 +203,6 @@ class MessageHandler:
                 for chunk in chunks:
                     await self._safe_send(message.chat_id, chunk)
 
-            logger.info(f"Replied to {message.user_open_id} in chat {message.chat_id} | reply: {response[:300]}")
-            return HandlerResult(success=True)            # 10. Format and send text response
-            formatted = self.formatter.format_text(response)
-            chunks = self.formatter.split_messages(formatted)
-            for chunk in chunks:
-                await self._safe_send(message.chat_id, chunk)
 
             logger.info(f"Replied to {message.user_open_id} in chat {message.chat_id} | reply: {response[:300]}")
             return HandlerResult(success=True)

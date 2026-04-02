@@ -29,7 +29,7 @@ class TestGuessFileType:
         assert guess_file_type(".txt") == "txt"
 
     def test_unknown(self):
-        assert guess_file_type(".xyz") == "bin"
+        assert guess_file_type(".xyz") == "zip"
 
     def test_uppercase(self):
         assert guess_file_type(".PDF") == "pdf"

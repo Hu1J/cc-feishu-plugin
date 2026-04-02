@@ -115,4 +115,4 @@ EXT_TO_FILE_TYPE = {
 
 def guess_file_type(ext: str) -> str:
     """扩展名（如 '.pdf'）→ 飞书 file_type（如 'pdf'）。未知默认 'bin'。"""
-    return EXT_TO_FILE_TYPE.get(ext.lower(), "bin")
+    return EXT_TO_FILE_TYPE.get(ext.lower(), "zip")
