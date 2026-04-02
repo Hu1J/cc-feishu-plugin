@@ -67,20 +67,16 @@ async def handle_message(message: IncomingMessage, handler: MessageHandler) -> N
         logger.exception(f"Error handling message: {e}")
 
 
-SKILL_NAME = "cc-feishu-send-file"
-SKILL_VERSION = "1.0.0"
-
-
 def ensure_skill_installed() -> None:
     """Install or update the cc-feishu-send-file skill to ~/.claude/skills/.
 
     Idempotent: skips if version matches, updates if version differs.
+    The skill content is bundled inside the package (cc_feishu_bridge.skill_md)
+    so this works correctly whether installed via pip or as a PyInstaller binary.
     """
     import os
-    import shutil
 
-    skill_src = os.path.join(os.path.dirname(__file__), "..", "..", "skills", SKILL_NAME, "skill.md")
-    skill_src = os.path.normpath(skill_src)
+    from cc_feishu_bridge.skill_md import SKILL_MD, SKILL_NAME, SKILL_VERSION
 
     dest_dir = os.path.expanduser(f"~/.claude/skills/{SKILL_NAME}")
     dest_path = os.path.join(dest_dir, "skill.md")
@@ -94,9 +90,9 @@ def ensure_skill_installed() -> None:
             logger.info(f"Skill {SKILL_NAME} v{SKILL_VERSION} already installed, skipping.")
             return
 
-    # Install or update
+    # Install or update — write the bundled string to disk
     os.makedirs(dest_dir, exist_ok=True)
-    shutil.copy2(skill_src, dest_path)
+    open(dest_path, "w", encoding="utf-8").write(SKILL_MD)
     open(version_marker, "w").write(SKILL_VERSION)
     logger.info(f"Installed skill {SKILL_NAME} v{SKILL_VERSION} to {dest_dir}")
 
