@@ -90,3 +90,29 @@ def save_bytes(path: str, data: bytes) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         f.write(data)
+
+
+# 扩展名 → 飞书 file_type
+EXT_TO_FILE_TYPE = {
+    ".pdf": "pdf",
+    ".doc": "doc",
+    ".docx": "docx",
+    ".xls": "xls",
+    ".xlsx": "xlsx",
+    ".ppt": "ppt",
+    ".pptx": "pptx",
+    ".zip": "zip",
+    ".txt": "txt",
+    ".csv": "csv",
+    ".png": "png",
+    ".jpg": "png",   # 飞书图片统一用 png
+    ".jpeg": "png",
+    ".gif": "gif",
+    ".webp": "webp",
+    ".bmp": "bmp",
+}
+
+
+def guess_file_type(ext: str) -> str:
+    """扩展名（如 '.pdf'）→ 飞书 file_type（如 'pdf'）。未知默认 'bin'。"""
+    return EXT_TO_FILE_TYPE.get(ext.lower(), "bin")
