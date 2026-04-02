@@ -27,6 +27,16 @@ class BeginResult:
     user_code: Optional[str] = None
 
 
+@dataclass
+class DeviceAuthResult:
+    device_code: str
+    verification_uri: str
+    verification_uri_complete: str
+    expires_in: int
+    interval: int
+    user_code: str
+
+
 class FeishuInstallAPI:
     """
     Feishu App Registration API using OAuth Device Flow.
@@ -44,7 +54,9 @@ class FeishuInstallAPI:
     BASE_URL_FEISHU = "https://accounts.feishu.cn"
     BASE_URL_LARK = "https://accounts.larksuite.com"
 
-    def __init__(self, env: str = "prod"):
+    def __init__(self, app_id: str = "", app_secret: str = "", env: str = "prod"):
+        self.app_id = app_id
+        self.app_secret = app_secret
         self.env = env
         self._base_url = self.BASE_URL_FEISHU
         self._client: Optional[httpx.AsyncClient] = None
@@ -154,3 +166,52 @@ class FeishuInstallAPI:
             await asyncio.sleep(interval)
 
         raise RuntimeError("扫码超时，请重新运行安装命令")
+
+    async def device_auth_begin(self, scopes: list[str]) -> DeviceAuthResult:
+        """Start OAuth Device Authorization flow for user auth."""
+        client = await self._get_client()
+        resp = await client.post(
+            self._url("/oauth/v1/device_authorization"),
+            data={
+                "client_id": self.app_id,
+                "client_secret": self.app_secret,
+                "scope": " ".join(scopes),
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        data = resp.json()
+        if data.get("error"):
+            raise RuntimeError(f"Device auth error: {data['error']}")
+        return DeviceAuthResult(
+            device_code=data["device_code"],
+            verification_uri=data["verification_uri"],
+            verification_uri_complete=data["verification_uri_complete"],
+            expires_in=data.get("expires_in", 300),
+            interval=data.get("interval", 5),
+            user_code=data.get("user_code", ""),
+        )
+
+    async def device_auth_poll(self, device_code: str) -> dict | None:
+        """Poll for user authorization. Returns token dict on success, None if still pending."""
+        client = await self._get_client()
+        resp = await client.post(
+            self._url("/oauth/v1/device_authorization/token"),
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "device_code": device_code,
+                "client_id": self.app_id,
+                "client_secret": self.app_secret,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        data = resp.json()
+        if data.get("error") == "authorization_pending":
+            return None  # Still waiting
+        if data.get("error"):
+            raise RuntimeError(f"Auth failed: {data['error']}")
+        return {
+            "access_token": data["access_token"],
+            "refresh_token": data.get("refresh_token", ""),
+            "expires_in": data.get("expires_in", 0),
+            "token_type": data.get("token_type", "Bearer"),
+        }
