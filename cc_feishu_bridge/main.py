@@ -417,11 +417,11 @@ def main(args=None):
 
     args = parser.parse_args(args)
 
-    _stdout_handler = logging.StreamHandler(sys.stdout)
     try:
-        _stdout_handler.stream.reconfigure(encoding="utf-8")  # type: ignore
-    except (AttributeError, TypeError):
-        pass  # fallback for older Python or non-seekable streams
+        sys.stdout.reconfigure(encoding="utf-8")
+    except AttributeError:
+        pass  # Python < 3.7
+    _stdout_handler = logging.StreamHandler(sys.stdout)
     _stdout_handler.setLevel(args.log_level)
     _stdout_handler.setFormatter(ColoredFormatter("%(asctime)s %(levelname)s %(message)s"))
     logging.root.addHandler(_stdout_handler)
