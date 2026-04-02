@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Callable, Awaitable
+from typing import Any, Callable, Awaitable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,17 @@ class ClaudeIntegration:
         self.cli_path = cli_path
         self.max_turns = max_turns
         self.approved_directory = approved_directory
+        self._active_client: Optional[Any] = None
+
+    async def interrupt_current(self) -> bool:
+        """Send SIGINT to the running Claude subprocess. Returns True if interrupted."""
+        if self._active_client is None:
+            return False
+        try:
+            await self._active_client.interrupt()
+            return True
+        except Exception:
+            return False
 
     async def query(
         self,
@@ -63,21 +74,25 @@ class ClaudeIntegration:
             result_cost = 0.0
 
             async with client:
-                await client.query(prompt=prompt, session_id=session_id)
+                self._active_client = client
+                try:
+                    await client.query(prompt=prompt, session_id=session_id)
 
-                async for message in client.receive_response():
-                    msg_type = type(message).__name__
+                    async for message in client.receive_response():
+                        msg_type = type(message).__name__
 
-                    # Extract result from final ResultMessage
-                    if msg_type == "ResultMessage":
-                        result_text = getattr(message, "result", "") or ""
-                        result_session_id = getattr(message, "session_id", session_id) or session_id
-                        result_cost = getattr(message, "total_cost_usd", 0.0) or 0.0
+                        # Extract result from final ResultMessage
+                        if msg_type == "ResultMessage":
+                            result_text = getattr(message, "result", "") or ""
+                            result_session_id = getattr(message, "session_id", session_id) or session_id
+                            result_cost = getattr(message, "total_cost_usd", 0.0) or 0.0
 
-                    if on_stream:
-                        parsed = self._parse_message(message)
-                        if parsed:
-                            await on_stream(parsed)
+                        if on_stream:
+                            parsed = self._parse_message(message)
+                            if parsed:
+                                await on_stream(parsed)
+                finally:
+                    self._active_client = None
 
             return (
                 result_text,
