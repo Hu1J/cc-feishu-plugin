@@ -16,12 +16,12 @@ class Session:
     session_id: str
     sdk_session_id: str | None
     user_id: str
-    chat_id: str | None = None   # 新增：最近活跃的飞书 chat_id
     project_path: str
     created_at: datetime
     last_used: datetime
     total_cost: float
     message_count: int
+    chat_id: str | None = None   # 新增：最近活跃的飞书 chat_id
 
 
 class SessionManager:
@@ -107,7 +107,7 @@ class SessionManager:
                 session_id=row["session_id"],
                 sdk_session_id=row["sdk_session_id"],
                 user_id=row["user_id"],
-                chat_id=row.get("chat_id"),
+                chat_id=row["chat_id"],
                 project_path=row["project_path"],
                 created_at=datetime.fromisoformat(row["created_at"]),
                 last_used=datetime.fromisoformat(row["last_used"]),

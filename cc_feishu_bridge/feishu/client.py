@@ -207,7 +207,6 @@ class FeishuClient:
                 .file(io.BytesIO(file_bytes))
                 .file_name(file_name)
                 .file_type(file_type)
-                .file_size(str(len(file_bytes)))
                 .build()
             )
             .build()
@@ -215,6 +214,7 @@ class FeishuClient:
         try:
             response = await asyncio.to_thread(client.im.v1.file.create, request)
             if not response.success():
+                logger.error(f"upload_file raw response: {response}")
                 raise RuntimeError(f"Failed to upload file: {response.msg}")
             logger.info(f"Uploaded file: {response.data.file_key} ({file_name})")
             return response.data.file_key
