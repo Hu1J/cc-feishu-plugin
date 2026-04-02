@@ -35,7 +35,7 @@ class ReplyFormatter:
 
     def format_tool_call(self, tool_name: str, tool_input: str | None = None) -> str:
         """Format a tool call notification for the user."""
-        icon = self.tool_icons.get(tool_name, "🔧")
+        icon = self.tool_icons.get(tool_name, "🤖")
         msg = f"{icon} **{tool_name}**"
         if tool_input:
             # Truncate long inputs
