@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import shutil
 import signal
@@ -26,10 +27,24 @@ from cc_feishu_bridge.claude.integration import ClaudeIntegration
 from cc_feishu_bridge.claude.session_manager import SessionManager
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 
-import logging
-import sys
-
 logger = logging.getLogger(__name__)
+
+
+class _SafeStreamHandler(logging.StreamHandler):
+    """StreamHandler that silently ignores UnicodeEncodeError on Windows GBK consoles."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            super().emit(record)
+        except UnicodeEncodeError:
+            # Fallback: encode with errors='replace' and write directly
+            try:
+                msg = self.format(record) + self.terminator
+                encoded = msg.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+                self.stream.write(encoded)
+                self.flush()
+            except Exception:
+                pass
 
 
 # ANSI color codes for terminal output
@@ -421,7 +436,7 @@ def main(args=None):
         sys.stdout.reconfigure(encoding="utf-8")
     except AttributeError:
         pass  # Python < 3.7
-    _stdout_handler = logging.StreamHandler(sys.stdout)
+    _stdout_handler = _SafeStreamHandler(sys.stdout)
     _stdout_handler.setLevel(args.log_level)
     _stdout_handler.setFormatter(ColoredFormatter("%(asctime)s %(levelname)s %(message)s"))
     logging.root.addHandler(_stdout_handler)
