@@ -26,6 +26,7 @@ from cc_feishu_bridge.security.validator import SecurityValidator
 from cc_feishu_bridge.claude.integration import ClaudeIntegration
 from cc_feishu_bridge.claude.session_manager import SessionManager
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
+from cc_feishu_bridge.proactive_scheduler import ProactiveScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,11 @@ async def handle_message(message: IncomingMessage, handler: MessageHandler) -> N
     """Callback for incoming Feishu messages — dispatch to handler."""
     # Keep error notifier's chat_id fresh for error reporting
     notifier_update_chat_id(message.chat_id)
+    # Update last message time for proactive tracking
+    if message.user_open_id:
+        session = handler.sessions.get_active_session(message.user_open_id)
+        if session:
+            handler.sessions.update_session(session.session_id, update_last_message=True)
     try:
         await handler.handle(message)
     except Exception as e:
@@ -227,7 +233,9 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     write_pid(pid_file)
 
     # Clean up PID file and lock on exit
+    proactive = None
     def cleanup(signum, frame):
+        proactive.stop()
         remove_pid(pid_file)
         lock.release()
         sys.exit(0)
@@ -255,6 +263,10 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     for sub in ("received_images", "received_files"):
         sub_dir = os.path.join(data_dir, sub)
         os.makedirs(sub_dir, exist_ok=True)
+
+    # Start proactive scheduler
+    proactive = ProactiveScheduler(config, handler.sessions)
+    proactive.start()
 
     ws_client.start()
 
