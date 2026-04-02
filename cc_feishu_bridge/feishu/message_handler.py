@@ -299,9 +299,12 @@ class MessageHandler:
                     if quoted_msg:
                         sender_id = quoted_msg.get("sender_id", "")
                         quoted_text = self._extract_quoted_content(quoted_msg)
-                        # Skip bot's own messages to avoid quoting itself
-                        if sender_id and sender_id.startswith("cli_"):
-                            quoted_content = ""  # Bot message — skip quoting to avoid loop
+                        # Skip only if the user is quoting their OWN message (to avoid
+                        # a user quoting themselves → bot sees it → bot replies → user
+                        # quoting bot → loop). We do want to pass along quoted bot
+                        # messages so the user can get contextual responses.
+                        if sender_id == message.user_open_id:
+                            quoted_content = ""  # User quoting themselves — skip
                         else:
                             quoted_content = f"[引用消息: {message.parent_id}] {quoted_text}"
                         logger.info(f"Quoted message {message.parent_id}: {quoted_text[:100]!r}")
