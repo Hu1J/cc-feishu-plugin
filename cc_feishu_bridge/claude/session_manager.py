@@ -22,6 +22,9 @@ class Session:
     total_cost: float
     message_count: int
     chat_id: str | None = None   # 新增：最近活跃的飞书 chat_id
+    last_message_at: datetime | None = None
+    proactive_today_count: int = 0
+    proactive_today_date: str | None = None   # YYYY-MM-DD 格式
 
 
 class SessionManager:
@@ -37,11 +40,15 @@ class SessionManager:
                     session_id TEXT PRIMARY KEY,
                     sdk_session_id TEXT,
                     user_id TEXT NOT NULL,
+                    chat_id TEXT,
                     project_path TEXT NOT NULL,
                     created_at TIMESTAMP NOT NULL,
                     last_used TIMESTAMP NOT NULL,
                     total_cost REAL DEFAULT 0,
-                    message_count INTEGER DEFAULT 0
+                    message_count INTEGER DEFAULT 0,
+                    last_message_at TIMESTAMP,
+                    proactive_today_count INTEGER DEFAULT 0,
+                    proactive_today_date TEXT
                 )
             """)
             # Migrate: add sdk_session_id column if it doesn't exist (existing installs)
@@ -54,6 +61,21 @@ class SessionManager:
                 conn.execute("ALTER TABLE sessions ADD COLUMN chat_id TEXT")
             except sqlite3.OperationalError:
                 pass  # column already exists
+            # Migrate: add last_message_at column if it doesn't exist
+            try:
+                conn.execute("ALTER TABLE sessions ADD COLUMN last_message_at TIMESTAMP")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+            # Migrate: add proactive_today_count column if it doesn't exist
+            try:
+                conn.execute("ALTER TABLE sessions ADD COLUMN proactive_today_count INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            # Migrate: add proactive_today_date column if it doesn't exist
+            try:
+                conn.execute("ALTER TABLE sessions ADD COLUMN proactive_today_date TEXT")
+            except sqlite3.OperationalError:
+                pass
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_user_last
                 ON sessions(user_id, last_used DESC)
@@ -113,6 +135,9 @@ class SessionManager:
                 last_used=datetime.fromisoformat(row["last_used"]),
                 total_cost=row["total_cost"],
                 message_count=row["message_count"],
+                last_message_at=datetime.fromisoformat(row["last_message_at"]) if row["last_message_at"] else None,
+                proactive_today_count=row["proactive_today_count"],
+                proactive_today_date=row["proactive_today_date"],
             )
         return None
 
@@ -121,17 +146,30 @@ class SessionManager:
         session_id: str,
         cost: float = 0,
         message_increment: int = 0,
+        update_last_message: bool = False,
     ):
         """Update session stats after a conversation turn."""
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """UPDATE sessions
-                   SET last_used = ?,
-                       total_cost = total_cost + ?,
-                       message_count = message_count + ?
-                   WHERE session_id = ?""",
-                (datetime.utcnow().isoformat(), cost, message_increment, session_id),
-            )
+            if update_last_message:
+                conn.execute(
+                    """UPDATE sessions
+                       SET last_used = ?,
+                           total_cost = total_cost + ?,
+                           message_count = message_count + ?,
+                           last_message_at = ?
+                       WHERE session_id = ?""",
+                    (datetime.utcnow().isoformat(), cost, message_increment,
+                     datetime.utcnow().isoformat(), session_id),
+                )
+            else:
+                conn.execute(
+                    """UPDATE sessions
+                       SET last_used = ?,
+                           total_cost = total_cost + ?,
+                           message_count = message_count + ?
+                       WHERE session_id = ?""",
+                    (datetime.utcnow().isoformat(), cost, message_increment, session_id),
+                )
 
     def update_sdk_session_id(self, session_id: str, sdk_session_id: str) -> None:
         """Store the SDK's session ID for future continue_session calls."""
@@ -167,6 +205,9 @@ class SessionManager:
                     last_used=datetime.fromisoformat(row["last_used"]),
                     total_cost=row["total_cost"],
                     message_count=row["message_count"],
+                    last_message_at=datetime.fromisoformat(row["last_message_at"]) if row["last_message_at"] else None,
+                    proactive_today_count=row["proactive_today_count"],
+                    proactive_today_date=row["proactive_today_date"],
                 )
             return None
 
@@ -183,4 +224,43 @@ class SessionManager:
                        LIMIT 1
                    )""",
                 (chat_id, user_id),
+            )
+
+    def get_all_users(self) -> list[Session]:
+        """Get all sessions with last_message_at info for proactive check."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT * FROM sessions
+                   WHERE last_message_at IS NOT NULL
+                   ORDER BY last_used DESC"""
+            ).fetchall()
+        return [
+            Session(
+                session_id=row["session_id"],
+                sdk_session_id=row["sdk_session_id"],
+                user_id=row["user_id"],
+                chat_id=row["chat_id"],
+                project_path=row["project_path"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                last_used=datetime.fromisoformat(row["last_used"]),
+                total_cost=row["total_cost"],
+                message_count=row["message_count"],
+                last_message_at=datetime.fromisoformat(row["last_message_at"]),
+                proactive_today_count=row["proactive_today_count"],
+                proactive_today_date=row["proactive_today_date"],
+            )
+            for row in rows
+        ]
+
+    def bump_proactive_count(self, session_id: str) -> None:
+        """Increment proactive count for the day, reset if new day."""
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """UPDATE sessions
+                   SET proactive_today_count = proactive_today_count + 1,
+                       proactive_today_date = ?
+                   WHERE session_id = ?""",
+                (today, session_id),
             )
