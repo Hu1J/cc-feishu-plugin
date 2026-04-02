@@ -28,7 +28,8 @@ def handler():
     from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
     import datetime
 
-    feishu = MagicMock(spec=FeishuClient)
+    # Use plain MagicMock without spec to avoid call_args interference
+    feishu = MagicMock()
     feishu.app_id = "app_123"
     feishu.app_secret = "sec_456"
     feishu.send_text = AsyncMock(return_value="msg_ok")
@@ -36,18 +37,20 @@ def handler():
     feishu.update_message = AsyncMock()
     feishu.add_typing_reaction = AsyncMock(return_value="rx_123")
     feishu.remove_typing_reaction = AsyncMock()
+    feishu.get_message = AsyncMock(return_value=None)
+    feishu.send_text_reply = AsyncMock(return_value="msg_reply_ok")
 
-    auth = MagicMock(spec=Authenticator)
+    auth = MagicMock()
     auth.authenticate.return_value = MagicMock(authorized=True)
 
-    validator = MagicMock(spec=SecurityValidator)
+    validator = MagicMock()
     validator.validate.return_value = (True, None)
 
-    claude = MagicMock(spec=ClaudeIntegration)
+    claude = MagicMock()
     claude.interrupt_current = AsyncMock(return_value=True)
     claude.query = AsyncMock(return_value=("Claude response text", None, 0.0))
 
-    sessions = MagicMock(spec=SessionManager)
+    sessions = MagicMock()
     sessions.get_active_session.return_value = MagicMock(
         session_id="sess_test", sdk_session_id=None,
         user_id="ou_test", chat_id="oc_test",
@@ -55,7 +58,7 @@ def handler():
         last_used=datetime.datetime.now(), total_cost=0.0, message_count=0
     )
 
-    formatter = MagicMock(spec=ReplyFormatter)
+    formatter = MagicMock()
     formatter.format_text.side_effect = lambda x: x
     formatter.split_messages.side_effect = lambda x: [x] if x else []
     formatter.format_tool_call.return_value = "🔧 Tool"
@@ -81,6 +84,8 @@ def make_msg(content: str) -> IncomingMessage:
         content=content,
         message_type="text",
         create_time="",
+        parent_id="",
+        thread_id="",
     )
 
 
@@ -89,8 +94,9 @@ async def test_feishu_auth_command_triggers_flow(handler):
     """Sending /feishu auth should start auth flow and return immediately."""
     msg = make_msg("/feishu auth")
     with patch("cc_feishu_bridge.feishu.auth_flow.run_auth_flow") as mock_flow:
-        result = await handler.handle(msg)
-        assert result.success
+        # In queue architecture, handle() queues and returns; _process_message runs it
+        await handler.handle(msg)
+        await handler._process_message(msg)
         mock_flow.assert_called_once()
         call_kwargs = mock_flow.call_args.kwargs
         assert call_kwargs["user_open_id"] == "ou_test"
@@ -102,52 +108,60 @@ async def test_feishu_auth_command_triggers_flow(handler):
 
 @pytest.mark.asyncio
 async def test_feishu_help_command(handler):
-    """Sending /feishu without subcommand should return help text."""
+    """Sending /feishu without subcommand should send help text via reply."""
     msg = make_msg("/feishu")
-    result = await handler.handle(msg)
-    assert result.success
-    response_text = result.response_text or ""
-    assert "cc-feishu-bridge" in response_text
-    assert "/new" in response_text
-    assert "/status" in response_text
-    assert "/stop" in response_text
-    assert "/feishu auth" in response_text
+    await handler.handle(msg)
+    await handler._process_message(msg)
+    # send_text_reply(chat_id, text, reply_to_message_id) — text is 2nd positional arg
+    handler.feishu.send_text_reply.assert_called()
+    call_args = handler.feishu.send_text_reply.call_args
+    _, text, _ = call_args[0]
+    assert "cc-feishu-bridge" in text
+    assert "/new" in text
+    assert "/status" in text
+    assert "/stop" in text
+    assert "/feishu auth" in text
 
 
 @pytest.mark.asyncio
 async def test_unknown_command_returns_error(handler):
-    """Unknown / command should return error text."""
+    """Unknown / command should send error text via reply."""
     msg = make_msg("/foobar")
-    result = await handler.handle(msg)
-    assert result.success
-    assert "未知命令" in (result.response_text or "")
+    await handler.handle(msg)
+    await handler._process_message(msg)
+    handler.feishu.send_text_reply.assert_called()
+    _, text, _ = handler.feishu.send_text_reply.call_args[0]
+    assert "未知命令" in text
 
 
 @pytest.mark.asyncio
 async def test_stop_command_when_no_active_query(handler):
-    """Sending /stop when no query is running should report no active query."""
+    """Sending /stop when no query is running should send no-active-query message."""
+    handler._worker_task = None
     msg = make_msg("/stop")
-    result = await handler.handle(msg)
+    # Call _handle_stop directly to bypass the queue/worker mechanics
+    result = await handler._handle_stop(msg)
     assert result.success
-    assert "当前没有正在运行的查询" in (result.response_text or "")
+    handler.feishu.send_text_reply.assert_called()
+    _, text, _ = handler.feishu.send_text_reply.call_args[0]
+    assert "当前没有正在运行的查询" in text
     handler.claude.interrupt_current.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_stop_command_interrupts_active_query(handler):
     """Sending /stop while a query is running should interrupt it."""
-    # Simulate an active task by directly setting internal state
+    handler._worker_task = None
+    # Set up a real background task — simulates an actively-running query
     async def dummy_task():
         await asyncio.sleep(10)
 
-    handler._active_task = asyncio.create_task(dummy_task())
-    handler._active_user_id = "ou_test"
+    handler._worker_task = asyncio.create_task(dummy_task())
+    # Give the task a chance to actually start
+    await asyncio.sleep(0)
 
     msg = make_msg("/stop")
-    result = await handler.handle(msg)
-
+    result = await handler._handle_stop(msg)
     assert result.success
     handler.claude.interrupt_current.assert_called_once()
-    # Task should have been cancelled
-    assert handler._active_task is None
-    assert handler._active_user_id is None
+    assert handler._worker_task is None

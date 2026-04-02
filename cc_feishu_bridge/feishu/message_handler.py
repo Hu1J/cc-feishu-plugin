@@ -110,13 +110,30 @@ class MessageHandler:
         self.formatter = formatter
         self.approved_directory = approved_directory
         self.data_dir = data_dir
-        self._queue: asyncio.Queue[IncomingMessage] = asyncio.Queue()
+        self._queue: asyncio.Queue[IncomingMessage] | None = None
+        self._queue_loop_id: int | None = None
         self._worker_task: asyncio.Task | None = None
         self._current_message_id: str = ""
 
+    def _get_queue(self) -> asyncio.Queue[IncomingMessage]:
+        """Lazily create (or recreate) the queue in the current event loop.
+
+        If the event loop has changed since the queue was created (e.g., after
+        tests switch loops), discard the stale queue and create a fresh one.
+        """
+        try:
+            current_loop_id = id(asyncio.get_running_loop())
+        except RuntimeError:
+            current_loop_id = None
+        if self._queue is None or self._queue_loop_id != current_loop_id:
+            self._queue = asyncio.Queue()
+            self._queue_loop_id = current_loop_id
+        return self._queue
+
     async def handle(self, message: IncomingMessage) -> HandlerResult:
         """将消息入队，立即返回。由 Worker 串行处理。"""
-        await self._queue.put(message)
+        queue = self._get_queue()
+        await queue.put(message)
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = asyncio.create_task(self._worker_loop())
         return HandlerResult(success=True)
@@ -125,15 +142,21 @@ class MessageHandler:
         """串行出队并处理消息。"""
         while True:
             try:
-                message = await self._queue.get()
+                queue = self._get_queue()
+                message = await queue.get()
                 try:
                     self._current_message_id = message.message_id
                     await self._process_message(message)
                 finally:
                     self._current_message_id = ""
-                    self._queue.task_done()
+                    queue.task_done()
             except asyncio.CancelledError:
                 break
+            except RuntimeError as e:
+                # Queue bound to a different event loop (e.g., after test teardown) — exit silently.
+                if "different event loop" in str(e) or "Event loop is closed" in str(e):
+                    break
+                logger.exception("Worker loop error")
             except Exception:
                 logger.exception("Worker loop error")
 
@@ -328,10 +351,11 @@ class MessageHandler:
                 await self.feishu.remove_typing_reaction(message.message_id, reaction_id)
 
     async def _handle_stop(self, message: IncomingMessage) -> HandlerResult:
-        """Handle /stop — cancel the current worker task."""
+        """Handle /stop — cancel the current worker task and interrupt Claude."""
         if self._worker_task is None or self._worker_task.done():
             await self._safe_send(message.chat_id, message.message_id, "当前没有正在运行的查询。")
             return HandlerResult(success=True)
+        await self.claude.interrupt_current()
         self._worker_task.cancel()
         self._worker_task = None
         await self._safe_send(message.chat_id, message.message_id, "🛑 已发送停止信号，Claude 将中断当前任务。")

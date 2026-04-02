@@ -73,7 +73,7 @@ def test_handle_queues_message_and_returns_immediately():
         # Give worker loop a chance to run
         await asyncio.sleep(0.1)
         # Worker should have processed the message and emptied the queue
-        assert handler._queue.empty()
+        assert handler._get_queue().empty()
 
     asyncio.get_event_loop().run_until_complete(do_handle())
 
