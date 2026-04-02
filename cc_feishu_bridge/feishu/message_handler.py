@@ -1,7 +1,6 @@
 """Message handler orchestrator — routes messages to Claude and back."""
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from dataclasses import dataclass
@@ -21,60 +20,6 @@ class HandlerResult:
     success: bool
     response_text: str | None = None
     error: str | None = None
-
-
-class StreamAccumulator:
-    """Accumulates streaming text chunks and flushes them to Feishu in batches.
-
-    Feishu message updates are expensive (one message per API call), so we buffer
-    chunks and send a single update when a tool call arrives or after a short
-    idle period. This keeps the user updated in real-time without flooding
-    the chat with tiny fragments.
-    """
-
-    def __init__(self, chat_id: str, send_fn, flush_timeout: float = 1.5):
-        self.chat_id = chat_id
-        self._send = send_fn
-        self._flush_timeout = flush_timeout
-        self._buffer = ""
-        self._lock = asyncio.Lock()
-        self._timer_task: asyncio.Task | None = None
-
-    async def add_text(self, text: str) -> None:
-        """Append text chunk and (re)start the flush timer."""
-        if not text:
-            return
-        async with self._lock:
-            self._buffer += text
-            # Restart timer on new text
-            if self._timer_task:
-                self._timer_task.cancel()
-            self._timer_task = asyncio.create_task(self._flush_after(self._flush_timeout))
-
-    async def flush(self) -> None:
-        """Send accumulated text to Feishu immediately."""
-        async with self._lock:
-            if self._timer_task:
-                self._timer_task.cancel()
-                self._timer_task = None
-            if self._buffer:
-                text = self._buffer
-                self._buffer = ""
-                if text.strip():
-                    await self._send(self.chat_id, text)
-
-    async def _flush_after(self, delay: float) -> None:
-        """Flush after a delay, but cancel if more text arrives."""
-        try:
-            await asyncio.sleep(delay)
-            async with self._lock:
-                if self._buffer:
-                    text = self._buffer
-                    self._buffer = ""
-                    if text.strip():
-                        await self._send(self.chat_id, text)
-        except asyncio.CancelledError:
-            pass
 
 
 class MessageHandler:
@@ -151,13 +96,11 @@ class MessageHandler:
 
         # 7. Call Claude
         try:
-            # Accumulator buffers text chunks and flushes them to Feishu in real-time.
-            # Tool calls flush text immediately, then are sent separately.
-            accumulator = StreamAccumulator(message.chat_id, self._safe_send)
-
+            # During streaming, tool calls are sent immediately to Feishu so the user
+            # sees what's happening. Text chunks are logged only (not sent) — the
+            # final formatted response covers them all after streaming completes.
             async def stream_callback(claude_msg):
                 if claude_msg.tool_name:
-                    await accumulator.flush()
                     tool_text = self.formatter.format_tool_call(
                         claude_msg.tool_name,
                         claude_msg.tool_input,
@@ -166,18 +109,6 @@ class MessageHandler:
                     await self._safe_send(message.chat_id, tool_text)
                 elif claude_msg.content:
                     logger.info(f"[stream] text: {claude_msg.content[:100]}")
-                    await accumulator.add_text(claude_msg.content)
-
-            full_prompt = f"{media_prompt_prefix}\n{message.content}".strip() if media_prompt_prefix else message.content
-            response, new_session_id, cost = await self.claude.query(
-                prompt=full_prompt,
-                session_id=sdk_session_id,
-                cwd=session.project_path if session else self.approved_directory,
-                on_stream=stream_callback,
-            )
-
-            # Flush any remaining buffered text
-            await accumulator.flush()
 
             # 8. Save session
             if not session:
