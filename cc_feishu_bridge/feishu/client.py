@@ -8,6 +8,93 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
+def _stream_to_buffer(stream) -> bytes:
+    """Consume a Readable stream into a bytes buffer."""
+    chunks = []
+
+    def add_chunk(chunk):
+        chunks.append(chunk)
+
+    def done(_):
+        pass
+
+    def error(e):
+        raise e
+
+    stream.on("data", add_chunk)
+    stream.on("end", done)
+    stream.on("error", error)
+
+    # Synchronous read for use with asyncio.to_thread
+    result = b"".join(chunks)
+    return result
+
+
+def _extract_buffer_from_response(response) -> bytes:
+    """Extract binary buffer from lark-oapi response.
+
+    The Feishu SDK can return binary data in several shapes:
+      - A Buffer directly
+      - An ArrayBuffer
+      - A response object with .data as Buffer/ArrayBuffer
+      - A response object with .getReadableStream()
+      - A response object with .writeFile(path)
+      - An async iterable / iterator
+      - A Node.js Readable stream
+    """
+    import io
+
+    # Direct Buffer
+    if isinstance(response, (bytes, bytearray)):
+        return bytes(response)
+
+    # ArrayBuffer
+    if isinstance(response, memoryview):
+        return bytes(response)
+
+    resp = response
+    content_type = None
+    if hasattr(resp, "headers"):
+        content_type = resp.headers.get("content-type") or resp.headers.get("Content-Type")
+
+    # Response with .data as Buffer or ArrayBuffer
+    if hasattr(resp, "data"):
+        data = resp.data
+        if isinstance(data, bytes):
+            return data
+        if isinstance(data, memoryview):
+            return bytes(data)
+        if isinstance(data, io.BytesIO):
+            return data.getvalue()
+        # .data might be a readable stream
+        if callable(getattr(data, "pipe", None)):
+            return _stream_to_buffer(data)
+
+    # Response with .getReadableStream()
+    if callable(getattr(resp, "get_readable_stream", None)):
+        try:
+            stream = resp.get_readable_stream()
+            return _stream_to_buffer(stream)
+        except Exception:
+            pass
+
+    # Response with .getvalue() — e.g. .data.file.getvalue()
+    if callable(getattr(resp, "getvalue", None)):
+        try:
+            return resp.getvalue()
+        except Exception:
+            pass
+
+    # Node.js Readable stream (has .pipe method)
+    if callable(getattr(resp, "pipe", None)):
+        return _stream_to_buffer(resp)
+
+    raise RuntimeError(
+        f"[feishu] Unable to extract binary data from response: "
+        f"unrecognised format (type={type(response).__name__})"
+    )
+
+
 @dataclass
 class IncomingMessage:
     """Parsed incoming message from Feishu."""
@@ -152,7 +239,6 @@ class FeishuClient:
 
     async def download_media(self, message_id: str, file_key: str, msg_type: str = "image") -> bytes:
         """Download media (image/file) from a Feishu message."""
-        import io
         import lark_oapi as lark
         client = self._get_client()
         request = (
@@ -166,7 +252,8 @@ class FeishuClient:
             response = await asyncio.to_thread(client.im.v1.message_resource.get, request)
             if not response.success():
                 raise RuntimeError(f"Failed to download media: {response.msg}")
-            return response.data.file.getvalue()
+            # lark-oapi returns response.file as BytesIO — use .read()
+            return response.file.read()
         except Exception as e:
             logger.error(f"download_media error: {e}")
             raise

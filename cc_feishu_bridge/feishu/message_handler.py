@@ -132,7 +132,22 @@ class MessageHandler:
         return self._queue
 
     async def handle(self, message: IncomingMessage) -> HandlerResult:
-        """将消息入队，立即返回。由 Worker 串行处理。"""
+        """将消息入队，立即返回。由 Worker 串行处理。
+
+        注意：所有命令（/开头）都不入队，直接处理以确保立即响应。
+        """
+        # Commands are handled immediately — do not queue
+        if message.content.startswith("/") and _is_command(message.content):
+            # Authenticate first
+            auth_result = self.auth.authenticate(message.user_open_id)
+            if not auth_result.authorized:
+                logger.info(f"Ignoring command from unauthorized user: {message.user_open_id}")
+                return HandlerResult(success=True)
+            result = await self._handle_command(message)
+            if result.response_text:
+                await self._safe_send(message.chat_id, message.message_id, result.response_text)
+            return HandlerResult(success=True)
+
         queue = self._get_queue()
         await queue.put(message)
         if self._worker_task is None or self._worker_task.done():
@@ -164,16 +179,10 @@ class MessageHandler:
                 logger.exception("Worker loop error")
 
     async def _process_message(self, message: IncomingMessage) -> None:
-        """处理单条消息：鉴权 → 命令 → 媒体预处理 → 引用检测 → 查询。"""
+        """处理单条消息：鉴权 → 媒体预处理 → 引用检测 → 查询。"""
         auth_result = self.auth.authenticate(message.user_open_id)
         if not auth_result.authorized:
             logger.info(f"Ignoring message from unauthorized user: {message.user_open_id}")
-            return
-
-        if message.content.startswith("/") and _is_command(message.content):
-            result = await self._handle_command(message)
-            if result.response_text:
-                await self._safe_send(message.chat_id, message.message_id, result.response_text)
             return
 
         if message.message_type not in ("text", "image", "file", "audio"):
@@ -267,11 +276,18 @@ class MessageHandler:
 
             # Preprocess media (image/file/audio) before querying Claude
             media_prompt_prefix = ""
+            media_notify_text = ""
+            logger.warning(f"[_run_query] message_type={message.message_type!r}")
             if message.message_type in ("image", "file", "audio"):
+                logger.warning(f"[_run_query] entering media branch for {message.message_type}")
                 try:
                     media_prompt_prefix = await self._preprocess_media(message)
                     if media_prompt_prefix:
                         logger.info(f"Inbound media saved: {media_prompt_prefix}")
+                        # Notify user in Feishu that media was received
+                        icon = {"image": "🖼️", "file": "📎", "audio": "🎵"}.get(message.message_type, "📎")
+                        media_notify_text = f"{icon} 收到 {message.message_type}，正在分析..."
+                        await self._safe_send(message.chat_id, message.message_id, media_notify_text)
                 except Exception as e:
                     logger.warning(f"Failed to process inbound media: {e}")
                     media_prompt_prefix = ""
@@ -312,7 +328,10 @@ class MessageHandler:
                         claude_msg.tool_name,
                         claude_msg.tool_input,
                     )
-                    logger.info(f"[stream] tool: {claude_msg.tool_name}")
+                    tool_input_display = (claude_msg.tool_input or "")[:200]
+                    if len(claude_msg.tool_input or "") > 200:
+                        tool_input_display += "..."
+                    logger.info(f"[stream] tool: {claude_msg.tool_name} | input: {tool_input_display}")
                     await self._safe_send(message.chat_id, message.message_id, tool_text)
                 elif claude_msg.content:
                     logger.info(f"[stream] text: {claude_msg.content[:100]}")
@@ -320,7 +339,20 @@ class MessageHandler:
 
             prefix_parts = [p for p in [media_prompt_prefix, quoted_content] if p]
             prefix = "\n".join(prefix_parts) + "\n" if prefix_parts else ""
-            full_prompt = (prefix + message.content).strip()
+            # For text messages: prepend prefix to actual text content.
+            # For media messages (image/file/audio): message.content may contain user text
+            # (mixed image+text case). Use media prefix + user text.
+            is_media = message.message_type in ("image", "file", "audio")
+            if is_media and media_prompt_prefix:
+                # Media messages: prepend prefix to any user text
+                user_text = message.content.strip()
+                if user_text:
+                    full_prompt = (prefix + user_text).strip()
+                else:
+                    full_prompt = prefix.strip()
+            else:
+                # Text messages: prepend prefix to actual text content
+                full_prompt = (prefix + message.content).strip()
             response, new_session_id, cost = await self.claude.query(
                 prompt=full_prompt,
                 session_id=sdk_session_id,
@@ -411,11 +443,21 @@ class MessageHandler:
             return ""
 
         msg_id = message.message_id
-        content_str = message.content
+        logger.warning(f"[media] preprocessing {message.message_type} message {msg_id}")
+
+        # Use get_message API to get reliable content (WS event content may be
+        # missing image_key for image messages — API always returns it correctly).
+        msg_data = await self.feishu.get_message(msg_id)
+        if not msg_data:
+            logger.warning(f"[media] failed to fetch message {msg_id}")
+            return ""
+        content_str = msg_data.get("content", "{}")
+        logger.warning(f"[media] got content: {content_str[:200]!r}")
 
         try:
             content = json.loads(content_str)
         except Exception:
+            logger.warning(f"[media] json.loads failed on {content_str!r}")
             return ""
 
         data_dir = self.data_dir or os.getcwd()
@@ -423,12 +465,14 @@ class MessageHandler:
         if message.message_type == "image":
             file_key = content.get("image_key", "")
             if not file_key:
+                logger.warning(f"[media] no image_key in message {msg_id}")
                 return ""
+            logger.warning(f"[media] downloading image, key={file_key}")
             base_path = make_image_path(data_dir, msg_id)
             data = await self.feishu.download_media(msg_id, file_key, msg_type="image")
-            # 飞书图片通常是 PNG，写入时直接加 .png
             save_path = base_path + ".png"
             save_bytes(save_path, data)
+            logger.warning(f"[media] saved image to {save_path}")
             return f"[图片: {save_path}]"
 
         elif message.message_type == "file":
@@ -436,10 +480,13 @@ class MessageHandler:
             orig_name = content.get("file_name", "file")
             file_type = content.get("file_type", "bin")
             if not file_key:
+                logger.warning(f"[media] no file_key in message {msg_id}")
                 return ""
+            logger.warning(f"[media] downloading file {orig_name}, key={file_key}")
             save_path = make_file_path(data_dir, msg_id, orig_name, file_type)
             data = await self.feishu.download_media(msg_id, file_key, msg_type="file")
             save_bytes(save_path, data)
+            logger.warning(f"[media] saved file to {save_path}")
             return f"[文件: {save_path}]"
 
         elif message.message_type == "audio":
@@ -447,7 +494,9 @@ class MessageHandler:
                 file_key = content.get("file_key", "")
                 duration_ms = content.get("duration", 0)
                 if not file_key:
+                    logger.warning(f"[media] no file_key in audio message {msg_id}")
                     return ""
+                logger.warning(f"[media] downloading audio, key={file_key}")
                 from cc_feishu_bridge.feishu.media import make_audio_path
                 data = await self.feishu.download_media(msg_id, file_key, msg_type="audio")
                 base_path = make_audio_path(data_dir, msg_id)
@@ -455,6 +504,7 @@ class MessageHandler:
                 save_bytes(save_path, data)
                 duration_s = duration_ms / 1000 if duration_ms else None
                 duration_str = f" ({duration_s:.1f}s)" if duration_s else ""
+                logger.warning(f"[media] saved audio to {save_path}")
                 return f"[Audio: {save_path}{duration_str}]"
             except Exception as e:
                 logger.warning(f"Failed to process audio message: {e}")

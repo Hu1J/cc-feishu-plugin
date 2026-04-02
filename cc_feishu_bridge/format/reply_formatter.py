@@ -38,9 +38,14 @@ class ReplyFormatter:
         icon = self.tool_icons.get(tool_name, "🤖")
         msg = f"{icon} **{tool_name}**"
         if tool_input:
-            # Truncate long inputs
-            display = tool_input[:100] + "..." if len(tool_input) > 100 else tool_input
-            msg += f"\n`{display}`"
+            # Send complete input to Feishu (split if needed to respect message limit)
+            if len(tool_input) <= FEISHU_MAX_MESSAGE_LENGTH - len(msg) - 5:
+                msg += f"\n`{tool_input}`"
+            else:
+                # Split into chunks if tool_input is very long
+                chunks = self.split_messages(tool_input)
+                for chunk in chunks:
+                    msg += f"\n`{chunk}`"
         return msg
 
     def split_messages(self, text: str) -> list[str]:

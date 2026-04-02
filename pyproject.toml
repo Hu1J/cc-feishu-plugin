@@ -13,6 +13,7 @@ dependencies = [
     "Pillow>=10.0.0",
     "httpx>=0.25.0",
     "aiohttp>=3.9.0",
+    "filelock>=3.13.0",
 ]
 authors = [
     { name = "Hu1J", email = "2948696442@qq.com" },

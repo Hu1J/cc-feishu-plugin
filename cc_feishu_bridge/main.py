@@ -12,6 +12,8 @@ import signal
 import sys
 from pathlib import Path
 
+import filelock
+
 from cc_feishu_bridge.config import load_config, resolve_config_path
 from cc_feishu_bridge.feishu.client import FeishuClient, IncomingMessage
 from cc_feishu_bridge.feishu.ws_client import FeishuWSClient
@@ -171,6 +173,16 @@ def confirm_risk_warning(config_path: str) -> bool:
 
 def start_bridge(config_path: str, data_dir: str) -> None:
     """Start the bridge: load config and run WebSocket connection."""
+    # Acquire exclusive lock before starting — prevents multiple instances in the same directory
+    lock_file = os.path.join(data_dir, ".instance.lock")
+    lock = filelock.FileLock(lock_file, timeout=1)
+    try:
+        lock.acquire()
+    except filelock.Timeout:
+        print(f"错误：当前目录下已有一个 cc-feishu-bridge 实例正在运行 ({data_dir})")
+        print("如果确认没有实例在运行，请删除 .instance.lock 文件后重试。")
+        sys.exit(1)
+
     config = load_config(config_path)
     handler = create_handler(config, data_dir)
 
@@ -186,9 +198,10 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     pid_file = os.path.join(data_dir, "cc-feishu-bridge.pid")
     write_pid(pid_file)
 
-    # Clean up PID file on exit
+    # Clean up PID file and lock on exit
     def cleanup(signum, frame):
         remove_pid(pid_file)
+        lock.release()
         sys.exit(0)
     signal.signal(signal.SIGINT, cleanup)
     signal.signal(signal.SIGTERM, cleanup)

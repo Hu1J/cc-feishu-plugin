@@ -57,11 +57,27 @@ class FeishuWSClient:
                 content = content_str
                 if msg_type == "text":
                     try:
-                        content = json.loads(content_str).get("text", "")
+                        parsed = json.loads(content_str)
+                        has_text = "text" in parsed and parsed.get("text")
+                        has_image = "image_key" in parsed
+                        has_audio = "file_key" in parsed and "duration" in parsed
+                        has_file = "file_key" in parsed and not has_audio
+                        # Determine effective message type
+                        if has_image:
+                            msg_type = "image"
+                        elif has_audio:
+                            msg_type = "audio"
+                        elif has_file:
+                            msg_type = "file"
+                        # Preserve text content for mixed messages (image+text, etc.)
+                        if has_text:
+                            content = parsed.get("text", "")
+                        else:
+                            content = ""
                     except Exception:
                         pass
 
-                logger.debug(
+                logger.warning(
                     f"Raw message — type={msg_type!r}, content={content_str!r}, "
                     f"message_id={getattr(message, 'message_id', '')!r}"
                 )
@@ -81,7 +97,7 @@ class FeishuWSClient:
                     parent_id=getattr(message, "parent_id", ""),
                     thread_id=getattr(message, "thread_id", ""),
                 )
-                logger.info(f"Received message from {user_open_id}: {content!r}")
+                logger.info(f"Received message from {user_open_id}: type={msg_type!r} content={content!r}")
                 try:
                     loop = asyncio.get_running_loop()
                 except RuntimeError:

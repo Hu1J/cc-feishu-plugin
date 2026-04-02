@@ -94,9 +94,8 @@ async def test_feishu_auth_command_triggers_flow(handler):
     """Sending /feishu auth should start auth flow and return immediately."""
     msg = make_msg("/feishu auth")
     with patch("cc_feishu_bridge.feishu.auth_flow.run_auth_flow") as mock_flow:
-        # In queue architecture, handle() queues and returns; _process_message runs it
+        # Commands are handled immediately in handle() — no queue involved
         await handler.handle(msg)
-        await handler._process_message(msg)
         mock_flow.assert_called_once()
         call_kwargs = mock_flow.call_args.kwargs
         assert call_kwargs["user_open_id"] == "ou_test"
@@ -110,8 +109,8 @@ async def test_feishu_auth_command_triggers_flow(handler):
 async def test_feishu_help_command(handler):
     """Sending /feishu without subcommand should send help text via reply."""
     msg = make_msg("/feishu")
+    # Commands are handled immediately in handle() — no queue involved
     await handler.handle(msg)
-    await handler._process_message(msg)
     # send_text_reply(chat_id, text, reply_to_message_id) — text is 2nd positional arg
     handler.feishu.send_text_reply.assert_called()
     call_args = handler.feishu.send_text_reply.call_args
@@ -127,8 +126,8 @@ async def test_feishu_help_command(handler):
 async def test_unknown_command_returns_error(handler):
     """Unknown / command should send error text via reply."""
     msg = make_msg("/foobar")
+    # Commands are handled immediately in handle() — no queue involved
     await handler.handle(msg)
-    await handler._process_message(msg)
     handler.feishu.send_text_reply.assert_called()
     _, text, _ = handler.feishu.send_text_reply.call_args[0]
     assert "未知命令" in text
