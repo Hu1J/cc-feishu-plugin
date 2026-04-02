@@ -15,8 +15,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 -->
 
 <!-- Add new changes here before each release. Move to a version section below when tagging. -->
+- **全局消息队列**：所有用户消息统一进入 FIFO 队列，由单一 Worker 串行处理，支持多用户并发和同一用户连续消息有序执行
+- **回复链（Threaded Reply）**：Claude 的所有回复均以飞书引用回复（Reply API）的形式发送，对话结构清晰
+- **引用消息感知**：用户引用某条消息发送时，Claude 自动获取被引用内容并注入 prompt，格式为 `[引用消息: id] 发送者: 内容`；若引用消息不可用则降级显示 `[引用消息不可用: id]`
+- **音频消息支持**：用户发送语音消息时下载为 `.opus` 文件，以 `[Audio: path]` 格式传给 Claude
 - **/feishu auth 授权指令**：用户发送 `/feishu auth`，机器人发送交互卡片，用户点击授权后 token 持久化，支持文件上传等需要用户权限的操作
-- **/stop 打断指令**：用户发送 `/stop` 立即中断 Claude 当前查询
+- **/stop 打断指令**：用户发送 `/stop` 立即中断 Claude 当前查询，同时取消后台 Worker 任务
 - **多文件并发发送**：`cc-feishu-bridge send` 支持一次传入多个文件，所有文件并发上传、并发发送，显著提升批量发送速度（图片、文件可混合）
 - **Stream 实时推送**：Claude 生成回复时，文字片段实时推送到飞书（带缓冲，工具调用时 flush），避免碎片刷屏；如果流式过程中已发送过文字，则跳过最终完整回复，避免重复
 - **工具图标**：未知工具的兜底图标从 🔧 改为 🤖
