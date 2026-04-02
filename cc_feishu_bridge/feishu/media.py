@@ -97,15 +97,16 @@ def save_bytes(path: str, data: bytes) -> None:
 # 扩展名 → 飞书 file_type
 EXT_TO_FILE_TYPE = {
     ".pdf": "pdf",
-    ".doc": "doc",
+    ".doc": "docx",
     ".docx": "docx",
-    ".xls": "xls",
+    ".xls": "xlsx",
     ".xlsx": "xlsx",
-    ".ppt": "ppt",
+    ".ppt": "pptx",
     ".pptx": "pptx",
     ".zip": "zip",
-    ".txt": "txt",
-    ".csv": "csv",
+    ".txt": "stream",
+    ".csv": "stream",
+    ".md": "stream",
     ".png": "png",
     ".jpg": "png",   # 飞书图片统一用 png
     ".jpeg": "png",
@@ -116,8 +117,8 @@ EXT_TO_FILE_TYPE = {
 
 
 def guess_file_type(ext: str) -> str:
-    """扩展名（如 '.pdf'）→ 飞书 file_type（如 'pdf'）。未知默认 'zip'。"""
-    return EXT_TO_FILE_TYPE.get(ext.lower(), "zip")
+    """扩展名（如 '.pdf'）→ 飞书 file_type（如 'pdf'）。未知默认 'stream'。"""
+    return EXT_TO_FILE_TYPE.get(ext.lower(), "stream")
 
 
 def make_audio_path(data_dir: str, msg_id: str) -> str:

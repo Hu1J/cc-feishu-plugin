@@ -310,7 +310,7 @@ class FeishuClient:
             logger.error(f"send_image error: {e}")
             raise
 
-    async def upload_file(self, file_bytes: bytes, file_name: str, file_type: str) -> str:
+    async def upload_file(self, file_bytes: bytes, file_name: str, file_type: str | None) -> str:
         """Upload a file to Feishu and return the file_key."""
         import io
         import lark_oapi as lark
@@ -321,7 +321,7 @@ class FeishuClient:
                 lark.im.v1.CreateFileRequestBody.builder()
                 .file(io.BytesIO(file_bytes))
                 .file_name(file_name)
-                .file_type(file_type)
+                .file_type(file_type or "stream")
                 .build()
             )
             .build()
