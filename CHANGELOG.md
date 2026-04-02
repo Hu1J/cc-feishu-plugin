@@ -16,6 +16,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 <!-- Add new changes here before each release. Move to a version section below when tagging. -->
 
+## [0.1.3] - 2026-04-02
+
+### Fixed
+- **Claude 检查提前**：在 WS 连接前检查 Claude CLI 可用性，找不到直接报错退出，不再先连上飞书才发现
+- **/stop 修复**：修复偶发情况下 `/stop` 报"没有正在运行的查询"的问题（race condition：`create_task` 后协程未执行时 `task.done()` 已为 False）
+- **Windows Claude 路径**：把 `cli_path="claude"` 解析成完整路径，解决 Windows npm 安装的 `claude.cmd` 子进程找不到的问题
+- **Windows emoji 日志**：用 SafeStreamHandler 捕获 UnicodeEncodeError，避免 Windows GBK 控制台无法输出 emoji 导致日志报错
+- **会话续接修复**：`continue_conversation` 必须在 `ClaudeSDKClient` 创建前设置，SDK 在 `__init__` 时已读取该选项
+
+### Changed
+- `/feishu` 帮助指令改名为 `/help`，更直观
+- README 调整安装方式顺序，pip 安装推荐优先
+- 移除 PyInstaller 中冗余的 `qrcode_terminal` 隐式导入
+
 ## [0.1.2] - 2026-04-02
 
 ### Added
