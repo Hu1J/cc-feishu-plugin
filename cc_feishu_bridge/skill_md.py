@@ -44,4 +44,46 @@ cc-feishu-bridge send chart.png output.pdf --config /path/to/.cc-feishu-bridge/c
 - 使用绝对路径，不要用相对路径
 - config.yaml 为当前项目 .cc-feishu-bridge/ 目录下的配置文件
 - 飞书对文件大小有限制，单个文件不超过 30MB
+
+---
+
+## 飞书文档操作（lark-cli）
+
+当你需要用飞书开放平台 API 操作文档、日历、联系人等资源时，Claude 需要先安装 Lark CLI 工具。
+
+### 安装与授权（首次使用）
+
+```bash
+npm install -g @larksuite/cli
+lark-cli auth login --recommend
+lark-cli auth status
+```
+
+- `lark-cli auth login --recommend`：弹出授权链接，浏览器完成授权。`--recommend` 会自动请求推荐权限范围。
+- `lark-cli auth status`：确认授权状态，显示已登录账号。
+
+### 常用操作示例
+
+```bash
+# 查看帮助
+lark-cli --help
+
+# 查看日历事件
+lark-cli calendar +agenda
+
+# 搜索联系人
+lark-cli contact +search-user --query "张三"
+
+# 查看 Drive 文件列表
+lark-cli drive files list
+
+# 通用 API 调用
+lark-cli api GET /open-apis/drive/v1/files
+lark-cli api POST /open-apis/docx/v1/documents --data '{"title":"新文档"}'
+```
+
+### 权限说明
+
+- `--recommend` 请求的是应用在开放平台已开通的推荐权限。
+- 需要更多权限（如 wiki、sheets）时，先在 [飞书开放平台](https://open.feishu.cn/app) 为应用开通对应权限，再用 `lark-cli auth login --scope "wiki:doc:readonly sheets:readonly"` 重新授权。
 """

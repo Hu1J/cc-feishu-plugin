@@ -41,31 +41,43 @@ class FeishuInstallAPI:
     """
     Feishu App Registration API using OAuth Device Flow.
 
-    Endpoints (from @larksuite/openclaw-lark-tools feishu-auth.js):
-      - init   : POST /oauth/v1/app/registration  action=init
-      - begin  : POST /oauth/v1/app/registration  action=begin, archetype=PersonalAgent
-      - poll   : POST /oauth/v1/app/registration  action=poll, device_code=xxx
+    Endpoints (aligned with @larksuite/openclaw-lark device-flow.js):
+      - Device auth begin : POST /oauth/v1/device_authorization
+      - Token exchange   : POST /open-apis/authen/v2/oauth/token
+      - App registration  : POST /oauth/v1/app/registration (init/begin/poll)
 
-    Base URLs:
-      - Feishu: https://accounts.feishu.cn
-      - Lark  : https://accounts.larksuite.com
+    Brand-aware base URLs:
+      - Feishu accounts : https://accounts.feishu.cn
+      - Lark  accounts  : https://accounts.larksuite.com
+      - Feishu open     : https://open.feishu.cn
+      - Lark  open     : https://open.larksuite.com
     """
 
-    BASE_URL_FEISHU = "https://accounts.feishu.cn"
-    BASE_URL_LARK = "https://accounts.larksuite.com"
+    BASE_ACCOUNTS_FEISHU = "https://accounts.feishu.cn"
+    BASE_ACCOUNTS_LARK = "https://accounts.larksuite.com"
+    BASE_OPEN_FEISHU = "https://open.feishu.cn"
+    BASE_OPEN_LARK = "https://open.larksuite.com"
 
-    def __init__(self, app_id: str = "", app_secret: str = "", env: str = "prod"):
+    def __init__(self, app_id: str = "", app_secret: str = "", brand: str = "feishu"):
         self.app_id = app_id
         self.app_secret = app_secret
-        self.env = env
-        self._base_url = self.BASE_URL_FEISHU
+        self.brand = brand  # "feishu" or "lark"
+        self._accounts_base = self.BASE_ACCOUNTS_LARK if brand == "lark" else self.BASE_ACCOUNTS_FEISHU
+        self._open_base = self.BASE_OPEN_LARK if brand == "lark" else self.BASE_OPEN_FEISHU
         self._client: Optional[httpx.AsyncClient] = None
 
-    def set_domain(self, is_lark: bool):
-        self._base_url = self.BASE_URL_LARK if is_lark else self.BASE_URL_FEISHU
+    def _accounts_url(self, path: str) -> str:
+        return f"{self._accounts_base}{path}"
 
-    def _url(self, path: str) -> str:
-        return f"{self._base_url}{path}"
+    def _open_url(self, path: str) -> str:
+        return f"{self._open_base}{path}"
+
+    def _basic_auth(self) -> str:
+        """HTTP Basic Auth header for client credentials (appId:appSecret)."""
+        import base64
+        return "Basic " + base64.b64encode(
+            f"{self.app_id}:{self.app_secret}".encode()
+        ).decode()
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Return a shared client with cookie persistence (for nonce tracking)."""
@@ -87,7 +99,7 @@ class FeishuInstallAPI:
         """Initialize app registration. Returns { nonce, supported_auth_methods }."""
         client = await self._get_client()
         resp = await client.post(
-            self._url("/oauth/v1/app/registration"),
+            self._accounts_url("/oauth/v1/app/registration"),
             data={"action": "init"},
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
@@ -102,7 +114,7 @@ class FeishuInstallAPI:
         """
         client = await self._get_client()
         resp = await client.post(
-            self._url("/oauth/v1/app/registration"),
+            self._accounts_url("/oauth/v1/app/registration"),
             data={
                 "action": "begin",
                 "archetype": "PersonalAgent",
@@ -134,7 +146,7 @@ class FeishuInstallAPI:
 
         while time.monotonic() - start < timeout:
             resp = await client.post(
-                self._url("/oauth/v1/app/registration"),
+                self._accounts_url("/oauth/v1/app/registration"),
                 data={
                     "action": "poll",
                     "device_code": device_code,
@@ -168,16 +180,31 @@ class FeishuInstallAPI:
         raise RuntimeError("扫码超时，请重新运行安装命令")
 
     async def device_auth_begin(self, scopes: list[str]) -> DeviceAuthResult:
-        """Start OAuth Device Authorization flow for user auth."""
+        """Start OAuth Device Authorization flow for user auth.
+
+        Uses HTTP Basic Auth (app_id:app_secret) per RFC 8628 and Feishu's
+        device authorization endpoint requirements. The client_secret is NOT
+        sent in the request body — only client_id + scope.
+        Appends offline_access so the token response includes a refresh_token.
+        """
+        import base64
         client = await self._get_client()
+        credentials = base64.b64encode(
+            f"{self.app_id}:{self.app_secret}".encode()
+        ).decode()
+        scope_str = " ".join(scopes)
+        if "offline_access" not in scope_str:
+            scope_str = (scope_str + " offline_access") if scope_str else "offline_access"
         resp = await client.post(
-            self._url("/oauth/v1/device_authorization"),
+            self._accounts_url("/oauth/v1/device_authorization"),
             data={
                 "client_id": self.app_id,
-                "client_secret": self.app_secret,
-                "scope": " ".join(scopes),
+                "scope": scope_str,
             },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Authorization": f"Basic {credentials}",
+            },
         )
         resp.raise_for_status()
         data = resp.json()
@@ -197,16 +224,21 @@ class FeishuInstallAPI:
 
     async def device_auth_poll(self, device_code: str) -> dict | None:
         """Poll for user authorization. Returns token dict on success, None if still pending."""
+        import base64
         client = await self._get_client()
+        credentials = base64.b64encode(
+            f"{self.app_id}:{self.app_secret}".encode()
+        ).decode()
         resp = await client.post(
-            self._url("/oauth/v1/device_authorization/token"),
+            self._open_url("/open-apis/authen/v2/oauth/token"),
             data={
                 "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                 "device_code": device_code,
-                "client_id": self.app_id,
-                "client_secret": self.app_secret,
             },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Authorization": f"Basic {credentials}",
+            },
         )
         resp.raise_for_status()
         data = resp.json()

@@ -115,11 +115,13 @@ class FeishuClient:
         app_secret: str,
         bot_name: str = "Claude",
         data_dir: str = "",
+        brand: str = "feishu",
     ):
         self.app_id = app_id
         self.app_secret = app_secret
         self.bot_name = bot_name
         self.data_dir = data_dir
+        self.brand = brand  # "feishu" or "lark"
         self._client = None
 
     def _get_client(self):
@@ -417,6 +419,7 @@ class FeishuClient:
         chat_id: str,
         markdown_text: str,
         reply_to_message_id: str,
+        log_reply: bool = True,
     ) -> str:
         """Send a markdown message as a threaded reply using Feishu post format.
 
@@ -445,7 +448,8 @@ class FeishuClient:
         response = await asyncio.to_thread(client.im.v1.message.reply, request)
         if not response.success():
             raise RuntimeError(f"Failed to reply (post): {response.msg}")
-        logger.info(f"Replied post to {reply_to_message_id} in chat {chat_id}: {response.data.message_id}")
+        if log_reply:
+            logger.info(f"Replied post to {reply_to_message_id} in chat {chat_id}: {response.data.message_id}")
         return response.data.message_id
 
     async def send_interactive_reply(
@@ -453,6 +457,7 @@ class FeishuClient:
         chat_id: str,
         markdown_text: str,
         reply_to_message_id: str,
+        log_reply: bool = True,
     ) -> str:
         """Send a markdown message as a threaded reply using Feishu Interactive Card.
 

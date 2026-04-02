@@ -56,6 +56,7 @@ def create_handler(config, data_dir: str) -> MessageHandler:
         app_secret=config.feishu.app_secret,
         bot_name=config.feishu.bot_name,
         data_dir=data_dir,
+        brand=config.feishu.domain,
     )
     authenticator = Authenticator(allowed_users=config.auth.allowed_users)
     validator = SecurityValidator(approved_directory=config.claude.approved_directory)

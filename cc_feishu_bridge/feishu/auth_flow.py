@@ -19,6 +19,7 @@ async def run_auth_flow(
     update_card_fn,
     save_token_fn,
     scopes: list[str],
+    brand: str = "feishu",
 ) -> None:
     """
     Orchestrate the full Device Auth flow:
@@ -33,7 +34,7 @@ async def run_auth_flow(
     """
     from cc_feishu_bridge.install.api import FeishuInstallAPI
 
-    api = FeishuInstallAPI(app_id=app_id, app_secret=app_secret)
+    api = FeishuInstallAPI(app_id=app_id, app_secret=app_secret, brand=brand)
 
     # Step 1: Begin device auth
     try:

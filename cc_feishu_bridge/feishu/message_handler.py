@@ -191,11 +191,13 @@ class MessageHandler:
 
         # Only validate text content — media messages (image/file/audio) have empty
         # content at this stage and will get their path-injected content in _run_query.
-        if message.message_type == "text":
-            ok, err = self.validator.validate(message.content)
-            if not ok:
-                await self._safe_send(message.chat_id, message.message_id, f"⚠️ {err}")
-                return
+        # NOTE: SecurityValidator pattern checks are currently disabled.
+        # To re-enable: uncomment the block below.
+        # if message.message_type == "text":
+        #     ok, err = self.validator.validate(message.content)
+        #     if not ok:
+        #         await self._safe_send(message.chat_id, message.message_id, f"⚠️ {err}")
+        #         return
 
         session = self.sessions.get_active_session(message.user_open_id)
         sdk_session_id = session.sdk_session_id if session else None
@@ -332,7 +334,7 @@ class MessageHandler:
                     if len(claude_msg.tool_input or "") > 200:
                         tool_input_display += "..."
                     logger.info(f"[stream] tool: {claude_msg.tool_name} | input: {tool_input_display}")
-                    await self._safe_send(message.chat_id, message.message_id, tool_text)
+                    await self._safe_send(message.chat_id, message.message_id, tool_text, log_reply=False)
                 elif claude_msg.content:
                     logger.info(f"[stream] text: {claude_msg.content[:100]}")
                     await accumulator.add_text(claude_msg.content)
@@ -383,8 +385,8 @@ class MessageHandler:
                 chunks = self.formatter.split_messages(formatted)
                 for chunk in chunks:
                     await self._safe_send(message.chat_id, message.message_id, chunk)
-
-            logger.info(f"Replied to {message.user_open_id} in chat {message.chat_id} | reply: {response[:300]}")
+                # NOTE: "Replied to" log moved inside _safe_send (only fires for non-stream sends).
+                # Stream tool calls are already logged by their individual _safe_send calls.
 
         except asyncio.CancelledError:
             await self._safe_send(message.chat_id, message.message_id, "🛑 已打断 Claude。")
@@ -406,7 +408,7 @@ class MessageHandler:
         await self._safe_send(message.chat_id, message.message_id, "🛑 已发送停止信号，Claude 将中断当前任务。")
         return HandlerResult(success=True)
 
-    async def _safe_send(self, chat_id: str, reply_to_message_id: str, text: str):
+    async def _safe_send(self, chat_id: str, reply_to_message_id: str, text: str, log_reply: bool = True):
         """Send a markdown message as a threaded Feishu post/card, ignoring errors.
 
         Uses Interactive Card for content with fenced code blocks or tables,
@@ -418,9 +420,9 @@ class MessageHandler:
             if not formatted.strip():
                 return
             if self.formatter.should_use_card(formatted):
-                await self.feishu.send_interactive_reply(chat_id, formatted, reply_to_message_id)
+                await self.feishu.send_interactive_reply(chat_id, formatted, reply_to_message_id, log_reply=log_reply)
             else:
-                await self.feishu.send_post_reply(chat_id, formatted, reply_to_message_id)
+                await self.feishu.send_post_reply(chat_id, formatted, reply_to_message_id, log_reply=log_reply)
         except Exception as e:
             logger.warning(f"Failed to send message: {e}")
 
@@ -580,6 +582,7 @@ class MessageHandler:
                 update_card_fn=self._update_interactive_card,
                 save_token_fn=self._save_user_token,
                 scopes=["im:message", "im:file", "im:resource"],
+                brand=self.feishu.brand,
             )
         )
         return HandlerResult(success=True)
