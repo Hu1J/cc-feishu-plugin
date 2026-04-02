@@ -78,6 +78,10 @@ class MessageHandler:
         # Use SDK's session ID if available, so Claude can maintain context
         sdk_session_id = session.sdk_session_id if session else None
 
+        # Update chat_id for this user (so send command knows where to reply)
+        if session and session.chat_id != message.chat_id:
+            self.sessions.update_chat_id(message.user_open_id, message.chat_id)
+
         # 5. Add typing reaction to user's message (Feishu has no dedicated typing API;
         # the official plugin uses a 'Typing' emoji reaction instead)
         reaction_id = await self.feishu.add_typing_reaction(message.message_id)
