@@ -20,7 +20,14 @@ Claude Code 飞书桥接插件 — 在飞书中与本地 Claude Code 对话。
 
 ## 快速开始
 
-### 方式一：直接运行编译好的 CLI（推荐）
+### 方式一：pip 安装（推荐）
+
+```bash
+pip install -U cc-feishu-bridge
+cc-feishu-bridge
+```
+
+### 方式二：直接运行编译好的 CLI
 
 下载对应平台的压缩包并解压，然后将其加入系统 PATH 环境变量：
 
@@ -50,15 +57,6 @@ cc-feishu-bridge
 
 ```cmd
 cc-feishu-bridge.exe
-```
-
-首次运行会自动进入安装流程。
-
-### 方式二：pip 安装
-
-```bash
-pip install -U cc-feishu-bridge
-cc-feishu-bridge
 ```
 
 ### 方式三：源码安装
