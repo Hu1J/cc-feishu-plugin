@@ -2,7 +2,9 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import asyncio
 import pytest
+from unittest.mock import MagicMock, patch
 from cc_feishu_bridge.feishu.client import FeishuClient, IncomingMessage
 
 
@@ -16,6 +18,8 @@ def test_parse_incoming_text_message():
                 "msg_type": "text",
                 "content": '{"text": "hello world"}',
                 "create_time": "1234567890",
+                "parent_id": "om_parent_123",
+                "thread_id": "om_thread_456",
             },
             "sender": {
                 "sender_id": {"open_id": "ou_789"},
@@ -27,6 +31,8 @@ def test_parse_incoming_text_message():
     assert msg.message_id == "om_123"
     assert msg.content == "hello world"
     assert msg.user_open_id == "ou_789"
+    assert msg.parent_id == "om_parent_123"
+    assert msg.thread_id == "om_thread_456"
 
 
 def test_parse_incoming_empty_body():
@@ -78,3 +84,54 @@ def test_extract_file_info_invalid_json():
     name, ftype = client._extract_file_info("not json")
     assert name == "file"
     assert ftype == "bin"
+
+
+def test_get_message_success():
+    """get_message() should return message dict when API succeeds."""
+    client = FeishuClient(app_id="cli_test", app_secret="secret")
+    mock_item = {"message_id": "om_123", "content": '{"text":"hello"}'}
+    mock_response = MagicMock()
+    mock_response.success.return_value = True
+    mock_response.data.items = [mock_item]
+
+    with patch.object(client, '_get_client') as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        with patch('asyncio.to_thread', return_value=mock_response):
+            result = asyncio.get_event_loop().run_until_complete(
+                client.get_message("om_123")
+            )
+    assert result is not None
+    assert result["message_id"] == "om_123"
+
+
+def test_get_message_failure_returns_none():
+    """get_message() should return None when API call fails."""
+    client = FeishuClient(app_id="cli_test", app_secret="secret")
+    mock_response = MagicMock()
+    mock_response.success.return_value = False
+    mock_response.msg = "not found"
+
+    with patch.object(client, '_get_client') as mock_get_client:
+        mock_get_client.return_value = MagicMock()
+        with patch('asyncio.to_thread', return_value=mock_response):
+            result = asyncio.get_event_loop().run_until_complete(
+                client.get_message("om_bad")
+            )
+    assert result is None
+
+
+def test_send_text_reply():
+    """send_text_reply() should use ReplyMessageRequest and return message_id."""
+    client = FeishuClient(app_id="cli_test", app_secret="secret")
+    mock_response = MagicMock()
+    mock_response.success.return_value = True
+    mock_response.data.message_id = "om_reply_123"
+
+    with patch.object(client, '_get_client') as mock_get_client:
+        mock_get_client.return_value = MagicMock()
+        with patch('asyncio.to_thread', return_value=mock_response):
+            result = asyncio.get_event_loop().run_until_complete(
+                client.send_text_reply("chat_abc", "hello", "om_original")
+            )
+    assert result == "om_reply_123"

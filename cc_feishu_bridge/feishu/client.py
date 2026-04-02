@@ -14,9 +14,11 @@ class IncomingMessage:
     message_id: str
     chat_id: str
     user_open_id: str
-    content: str          # text content
-    message_type: str     # "text", "image", "file", etc.
+    content: str           # text content
+    message_type: str      # "text", "image", "file", "audio", etc.
     create_time: str
+    parent_id: str = ""    # 被引用消息的 ID（用户引用/回复某条消息时）
+    thread_id: str = ""    # 所在线程的 ID
 
 
 class FeishuClient:
@@ -69,6 +71,23 @@ class FeishuClient:
         if not response.success():
             raise RuntimeError(f"Failed to send message: {response.msg}")
         return response.data.message_id
+
+    async def get_message(self, message_id: str) -> dict | None:
+        """Fetch a message by ID. Returns message dict or None on failure."""
+        import lark_oapi as lark
+        client = self._get_client()
+        request = (
+            lark.im.v1.GetMessageRequest.builder()
+            .message_id(message_id)
+            .build()
+        )
+        response = await asyncio.to_thread(client.im.v1.message.get, request)
+        if not response.success():
+            logger.warning(f"get_message({message_id}) failed: {response.msg}")
+            return None
+        if response.data and response.data.items:
+            return response.data.items[0]
+        return None
 
     async def add_typing_reaction(self, message_id: str) -> str | None:
         """Add a typing emoji reaction to a message (Feishu typing indicator).
@@ -270,6 +289,86 @@ class FeishuClient:
             raise RuntimeError(f"Failed to send card: {response.msg}")
         return response.data.message_id
 
+    async def send_text_reply(
+        self,
+        chat_id: str,
+        text: str,
+        reply_to_message_id: str,
+    ) -> str:
+        """Send a text message as a threaded reply to a specific message."""
+        import json
+        import lark_oapi as lark
+        client = self._get_client()
+        request = (
+            lark.im.v1.ReplyMessageRequest.builder()
+            .message_id(reply_to_message_id)
+            .request_body(
+                lark.im.v1.ReplyMessageRequestBody.builder()
+                .content(json.dumps({"text": text}))
+                .msg_type("text")
+                .build()
+            )
+            .build()
+        )
+        response = await asyncio.to_thread(client.im.v1.message.reply, request)
+        if not response.success():
+            raise RuntimeError(f"Failed to reply: {response.msg}")
+        logger.info(f"Replied to {reply_to_message_id} in chat {chat_id}: {response.data.message_id}")
+        return response.data.message_id
+
+    async def send_image_reply(
+        self,
+        chat_id: str,
+        image_key: str,
+        reply_to_message_id: str,
+    ) -> str:
+        """Send an image message as a threaded reply."""
+        import json
+        import lark_oapi as lark
+        client = self._get_client()
+        request = (
+            lark.im.v1.ReplyMessageRequest.builder()
+            .message_id(reply_to_message_id)
+            .request_body(
+                lark.im.v1.ReplyMessageRequestBody.builder()
+                .content(json.dumps({"image_key": image_key}))
+                .msg_type("image")
+                .build()
+            )
+            .build()
+        )
+        response = await asyncio.to_thread(client.im.v1.message.reply, request)
+        if not response.success():
+            raise RuntimeError(f"Failed to reply image: {response.msg}")
+        return response.data.message_id
+
+    async def send_file_reply(
+        self,
+        chat_id: str,
+        file_key: str,
+        file_name: str,
+        reply_to_message_id: str,
+    ) -> str:
+        """Send a file message as a threaded reply."""
+        import json
+        import lark_oapi as lark
+        client = self._get_client()
+        request = (
+            lark.im.v1.ReplyMessageRequest.builder()
+            .message_id(reply_to_message_id)
+            .request_body(
+                lark.im.v1.ReplyMessageRequestBody.builder()
+                .content(json.dumps({"file_key": file_key, "file_name": file_name}))
+                .msg_type("file")
+                .build()
+            )
+            .build()
+        )
+        response = await asyncio.to_thread(client.im.v1.message.reply, request)
+        if not response.success():
+            raise RuntimeError(f"Failed to reply file: {response.msg}")
+        return response.data.message_id
+
     async def update_message(self, message_id: str, card_json: str) -> None:
         """Update an existing message's content (used for card status updates)."""
         import json
@@ -318,6 +417,8 @@ class FeishuClient:
                 content=self._extract_content(message),
                 message_type=message.get("msg_type", "text"),
                 create_time=message.get("create_time", ""),
+                parent_id=message.get("parent_id", ""),
+                thread_id=message.get("thread_id", ""),
             )
         except Exception as e:
             logger.error(f"Failed to parse incoming message: {e}")

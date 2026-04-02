@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from dataclasses import dataclass
 
 from cc_feishu_bridge.feishu.client import FeishuClient, IncomingMessage
@@ -14,6 +15,16 @@ from cc_feishu_bridge.claude.session_manager import SessionManager
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 
 logger = logging.getLogger(__name__)
+
+# Match a slash-command like "/stop", "/new", "/feishu auth", "/status foo"
+# Commands: / + letter + word-chars, optionally followed by space + args
+# NOT a path: paths contain slashes later (e.g. /Users/x/...)
+_COMMAND_RE = re.compile(r"^/[a-zA-Z][a-zA-Z0-9_-]*(?:\s.*)?$")
+
+
+def _is_command(text: str) -> bool:
+    """Return True if text looks like a slash command, not a Unix path."""
+    return bool(_COMMAND_RE.match(text))
 
 
 @dataclass
@@ -109,8 +120,9 @@ class MessageHandler:
             logger.info(f"Ignoring message from unauthorized user: {message.user_open_id}")
             return HandlerResult(success=True, response_text=None)  # Silently ignore
 
-        # 2. Handle commands
-        if message.content.startswith("/"):
+        # 2. Handle commands — but not Unix paths that start with /
+        # Commands look like "/stop", "/new", "/feishu auth" — NOT "/Users/..." or "/tmp/..."
+        if message.content.startswith("/") and _is_command(message.content):
             return await self._handle_command(message)
 
         # Handle non-text, non-media message types (audio, etc.)
@@ -215,6 +227,7 @@ class MessageHandler:
         try:
             # Add typing reaction
             reaction_id = await self.feishu.add_typing_reaction(message.message_id)
+            logger.info(f"[typing] on — user={message.user_open_id}, reaction_id={reaction_id!r}")
 
             # Preprocess media (image/file) before querying Claude
             media_prompt_prefix = ""
@@ -292,6 +305,7 @@ class MessageHandler:
             self._active_task = None
             self._active_user_id = None
             if reaction_id:
+                logger.info(f"[typing] off — user={message.user_open_id}, reaction_id={reaction_id!r}")
                 await self.feishu.remove_typing_reaction(message.message_id, reaction_id)
 
     async def _handle_stop(self, message: IncomingMessage) -> HandlerResult:

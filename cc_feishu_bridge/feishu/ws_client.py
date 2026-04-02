@@ -61,6 +61,11 @@ class FeishuWSClient:
                     except Exception:
                         pass
 
+                logger.debug(
+                    f"Raw message — type={msg_type!r}, content={content_str!r}, "
+                    f"message_id={getattr(message, 'message_id', '')!r}"
+                )
+
                 sender_id = getattr(sender, "sender_id", None)
                 user_open_id = ""
                 if sender_id is not None:

@@ -23,8 +23,28 @@ from cc_feishu_bridge.claude.session_manager import SessionManager
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 
 import logging
+import sys
 
 logger = logging.getLogger(__name__)
+
+
+# ANSI color codes for terminal output
+class ColoredFormatter(logging.Formatter):
+    """Add ANSI color codes to log records based on level. Used for terminal only."""
+
+    COLORS = {
+        "DEBUG": "\033[36m",     # cyan
+        "INFO": "\033[32m",      # green
+        "WARNING": "\033[33m",   # yellow
+        "ERROR": "\033[31m",     # red
+        "CRITICAL": "\033[35m",  # magenta
+    }
+    RESET = "\033[0m"
+
+    def format(self, record: logging.LogRecord) -> str:
+        color = self.COLORS.get(record.levelname, self.RESET)
+        record.levelname = f"{color}{record.levelname}{self.RESET}"
+        return super().format(record)
 
 
 def create_handler(config, data_dir: str) -> MessageHandler:
@@ -361,11 +381,14 @@ def main(args=None):
 
     logging.basicConfig(
         level=args.log_level,
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        format="%(asctime)s %(levelname)s %(message)s",
         handlers=[
-            logging.StreamHandler(),
+            logging.StreamHandler(sys.stdout),
         ],
     )
+    logging.getLogger().handlers[0].setFormatter(ColoredFormatter(
+        "%(asctime)s %(levelname)s %(message)s"
+    ))
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("qrcode").setLevel(logging.WARNING)
 
@@ -409,7 +432,7 @@ def main(args=None):
     log_file = os.path.join(data_dir, "cc-feishu-bridge.log")
     Path(data_dir).mkdir(exist_ok=True)
     fh = logging.FileHandler(log_file)
-    fh.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+    fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logging.getLogger().addHandler(fh)
     if is_installed:
         logger.info(f"Config found, starting bridge...")
