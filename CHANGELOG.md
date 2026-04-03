@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.1.6] - 2026-04-03
+
+### Added
+- **启动 Banner**：终端和日志文件同步打印红色 `cc-feishu-bridge v{version}` + 绿色 `started at {timestamp}`
+- **PyPI 自动发布**：推送 tag 时自动触发 GitHub Actions 构建 whl 并发布到 PyPI，同时验证 tag 版本与 pyproject.toml 一致
+
+### Changed
+- **主动推送默认开启**：`ProactiveConfig.enabled` 默认为 `True`（之前为 `False`）
+- **旧配置自动升级**：老用户 config.yaml 无 proactive 字段时，首次启动自动补全
+
+### Fixed
+- **ProactiveScheduler 事件循环**：修复在同步上下文中调用 `start()` 时 `asyncio.create_task()` 报错的问题，改为独立 daemon 线程运行自己的事件循环
+
 ## [Unreleased]
 
 <!--
@@ -13,8 +26,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 3. GitHub Actions 自动读取本文件作为 Release 说明
 4. 发版完成后，将 [Unreleased] 内容移至正式版本块，日期填当天，清空 [Unreleased]
 -->
-
-<!-- Add new changes here before each release. Move to a version section below when tagging. -->
 
 ## [0.1.3] - 2026-04-02
 
