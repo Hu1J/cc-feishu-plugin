@@ -6,22 +6,27 @@ from datetime import datetime
 from pathlib import Path
 
 
-BLUE = "\033[34m"
-PURPLE = "\033[35m"
 RED = "\033[31m"
-WHITE = "\033[37m"
+GREEN = "\033[32m"
 RESET = "\033[0m"
 
-TERMINAL_ART = """  {RED}cc-feishu-bridge  v{version}{RESET}
+TERMINAL_ART = """{RED}========================================{RESET}
+  {RED}cc-feishu-bridge  v{version}{RESET}
+  {GREEN}started at {timestamp}{RESET}
+{RED}========================================{RESET}
+
 """
 
 
 def print_banner(version: str) -> None:
-    """Print the large ASCII art banner to terminal (sys.__stdout__)."""
+    """Print the mini banner to terminal (sys.__stdout__)."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         out = sys.__stdout__
-        out.write(TERMINAL_ART.format(BLUE=BLUE, PURPLE=PURPLE, RED=RED, RESET=RESET, version=version))
-        out.write("\n")
+        out.write(TERMINAL_ART.format(
+            RED=RED, GREEN=GREEN, RESET=RESET,
+            version=version, timestamp=timestamp,
+        ))
         out.flush()
     except (OSError, IOError):
         pass  # Never crash on banner output
@@ -37,10 +42,10 @@ def write_log_banner(log_file: str, version: str) -> None:
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     banner = (
-        f"{'=' * 40}\n"
-        f"  cc-feishu-bridge  v{version}\n"
-        f"  started at {timestamp}\n"
-        f"{'=' * 40}\n\n"
+        f"{RED}========================================{RESET}\n"
+        f"  {RED}cc-feishu-bridge  v{version}{RESET}\n"
+        f"  {GREEN}started at {timestamp}{RESET}\n"
+        f"{RED}========================================{RESET}\n\n"
     )
     with open(p, "a", encoding="utf-8") as f:
         f.write(banner)
