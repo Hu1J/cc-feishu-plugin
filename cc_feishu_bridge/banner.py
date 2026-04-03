@@ -8,10 +8,11 @@ from pathlib import Path
 
 BLUE = "\033[34m"
 PURPLE = "\033[35m"
+RED = "\033[31m"
 WHITE = "\033[37m"
 RESET = "\033[0m"
 
-TERMINAL_ART = """  {WHITE}cc-feishu-bridge  v{version}{RESET}
+TERMINAL_ART = """  {RED}cc-feishu-bridge  v{version}{RESET}
 """
 
 
@@ -19,7 +20,7 @@ def print_banner(version: str) -> None:
     """Print the large ASCII art banner to terminal (sys.__stdout__)."""
     try:
         out = sys.__stdout__
-        out.write(TERMINAL_ART.format(BLUE=BLUE, PURPLE=PURPLE, WHITE=WHITE, RESET=RESET, version=version))
+        out.write(TERMINAL_ART.format(BLUE=BLUE, PURPLE=PURPLE, RED=RED, RESET=RESET, version=version))
         out.write("\n")
         out.flush()
     except (OSError, IOError):

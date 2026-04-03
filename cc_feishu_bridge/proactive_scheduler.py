@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from datetime import datetime, time
 
 from cc_feishu_bridge.config import Config
@@ -118,6 +119,8 @@ class ProactiveScheduler:
         self.session_manager = session_manager
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
 
     def start(self) -> None:
         if not self.config.proactive.enabled:
@@ -126,8 +129,14 @@ class ProactiveScheduler:
         if self._task is not None:
             return
         self._stop.clear()
-        self._task = asyncio.create_task(self._run())
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread.start()
         logger.info("Proactive scheduler started")
+
+    def _run_loop(self) -> None:
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_until_complete(self._run())
 
     async def stop(self) -> None:
         if self._task is None:
@@ -139,6 +148,10 @@ class ProactiveScheduler:
         except asyncio.CancelledError:
             pass
         self._task = None
+        self._loop = None
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+            self._thread = None
         logger.info("Proactive scheduler stopped")
 
     async def _run(self) -> None:
