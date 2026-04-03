@@ -196,11 +196,11 @@ class MessageHandler:
             logger.info(f"Ignoring message from unauthorized user: {message.user_open_id}")
             return
 
-        if message.message_type not in ("text", "image", "file", "audio"):
+        if message.message_type not in ("text", "image", "file"):
             await self._safe_send(message.chat_id, message.message_id, "暂不支持该消息类型，请发送文字消息。")
             return
 
-        # Only validate text content — media messages (image/file/audio) have empty
+        # Only validate text content — media messages (image/file) have empty
         # content at this stage and will get their path-injected content in _run_query.
         # NOTE: SecurityValidator pattern checks are currently disabled.
         # To re-enable: uncomment the block below.
@@ -285,18 +285,23 @@ class MessageHandler:
             reaction_id = await self.feishu.add_typing_reaction(message.message_id)
             logger.info(f"[typing] on — user={message.user_open_id}, reaction_id={reaction_id!r}")
 
-            # Preprocess media (image/file/audio) before querying Claude
+            # Audio is not yet supported — tell the user and skip Claude
+            if message.message_type == "audio":
+                await self._safe_send(message.chat_id, message.message_id, "🎙️ 暂不支持语音消息，请发送文字消息。")
+                return
+
+            # Preprocess media (image/file) before querying Claude
             media_prompt_prefix = ""
             media_notify_text = ""
             logger.debug(f"[_run_query] message_type={message.message_type!r}")
-            if message.message_type in ("image", "file", "audio"):
+            if message.message_type in ("image", "file"):
                 logger.debug(f"[_run_query] entering media branch for {message.message_type}")
                 try:
                     media_prompt_prefix = await self._preprocess_media(message)
                     if media_prompt_prefix:
                         logger.info(f"Inbound media saved: {media_prompt_prefix}")
                         # Notify user in Feishu that media was received
-                        icon = {"image": "🖼️", "file": "📎", "audio": "🎵"}.get(message.message_type, "📎")
+                        icon = {"image": "🖼️", "file": "📎"}.get(message.message_type, "📎")
                         media_notify_text = f"{icon} 收到 {message.message_type}，正在分析..."
                         await self._safe_send(message.chat_id, message.message_id, media_notify_text)
                 except Exception as e:
@@ -354,9 +359,9 @@ class MessageHandler:
             prefix_parts = [p for p in [media_prompt_prefix, quoted_content] if p]
             prefix = "\n".join(prefix_parts) + "\n" if prefix_parts else ""
             # For text messages: prepend prefix to actual text content.
-            # For media messages (image/file/audio): message.content may contain user text
+            # For media messages (image/file): message.content may contain user text
             # (mixed image+text case). Use media prefix + user text.
-            is_media = message.message_type in ("image", "file", "audio")
+            is_media = message.message_type in ("image", "file")
             if is_media and media_prompt_prefix:
                 # Media messages: prepend prefix to any user text
                 user_text = message.content.strip()
@@ -467,7 +472,7 @@ class MessageHandler:
             save_bytes,
         )
 
-        if message.message_type not in ("image", "file", "audio"):
+        if message.message_type not in ("image", "file"):
             return ""
 
         msg_id = message.message_id
@@ -534,28 +539,6 @@ class MessageHandler:
             # [File: /path] 告知 AI 收到了文件，AI 会用 Read 工具读取。
             # 包含原始文件名方便 AI 判断文件类型和内容。
             return f"[File: {save_path}] ({orig_name})"
-
-        elif message.message_type == "audio":
-            try:
-                file_key = content.get("file_key", "")
-                duration_ms = content.get("duration", 0)
-                if not file_key:
-                    logger.warning(f"[media] no file_key in audio message {msg_id}")
-                    return ""
-                logger.info(f"[media] downloading audio, key={file_key}")
-                from cc_feishu_bridge.feishu.media import make_audio_path
-                data = await self.feishu.download_media(msg_id, file_key, msg_type="audio")
-                base_path = make_audio_path(data_dir, msg_id)
-                save_path = base_path + ".opus"
-                save_bytes(save_path, data)
-                duration_s = duration_ms / 1000 if duration_ms else None
-                duration_str = f" ({duration_s:.1f}s)" if duration_s else ""
-                logger.info(f"[media] saved audio to {save_path}")
-                # [Audio: /path] 告知 AI 收到了音频，AI 会用 Read 工具读取。
-                return f"[Audio: {save_path}{duration_str}]"
-            except Exception as e:
-                logger.warning(f"Failed to process audio message: {e}")
-                return ""
 
         return ""
 

@@ -122,7 +122,7 @@ def guess_file_type(ext: str) -> str:
 
 
 def make_audio_path(data_dir: str, msg_id: str) -> str:
-    """Return the path for saving an inbound audio file."""
+    """Return the base path for saving an inbound audio file (extension added by caller, typically .ogg)."""
     audio_dir = os.path.join(data_dir, "received_audio")
     os.makedirs(audio_dir, exist_ok=True)
     return os.path.join(audio_dir, f"{msg_id}")
