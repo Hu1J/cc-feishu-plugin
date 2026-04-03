@@ -138,20 +138,19 @@ class ProactiveScheduler:
         asyncio.set_event_loop(self._loop)
         self._loop.run_until_complete(self._run())
 
-    async def stop(self) -> None:
+    def stop(self) -> None:
+        """Synchronous stop — safe to call from signal handlers."""
         if self._task is None:
             return
         self._stop.set()
-        self._task.cancel()
-        try:
-            await self._task
-        except asyncio.CancelledError:
-            pass
-        self._task = None
-        self._loop = None
+        # Cancel the task from within its own event loop (thread-safe)
+        if self._loop is not None and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._task.cancel)
         if self._thread is not None:
             self._thread.join(timeout=5)
             self._thread = None
+        self._task = None
+        self._loop = None
         logger.info("Proactive scheduler stopped")
 
     async def _run(self) -> None:
