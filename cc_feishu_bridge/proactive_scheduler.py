@@ -68,6 +68,7 @@ async def _send_proactive_message(
     try:
         await feishu.send_text(session.chat_id, text)
         session_manager.bump_proactive_count(session.session_id)
+        session_manager.update_last_proactive_at(session.session_id)
         logger.info(f"Proactive outreach sent to chat {session.chat_id}")
     except Exception as e:
         logger.warning(f"Proactive send failed: {e}")
@@ -103,6 +104,12 @@ async def _check_and_notify(
             if session.proactive_today_date == today:
                 if session.proactive_today_count >= cfg.max_per_day:
                     continue
+
+        # Cooldown check: skip if a proactive message was sent recently
+        if session.last_proactive_at:
+            cooldown = (datetime.utcnow() - session.last_proactive_at).total_seconds() / 60
+            if cooldown < cfg.cooldown_minutes:
+                continue
 
         await _send_proactive_message(session, config, session_manager)
 

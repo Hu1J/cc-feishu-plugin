@@ -17,7 +17,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Fixed
 - **ProactiveScheduler 事件循环**：修复在同步上下文中调用 `start()` 时 `asyncio.create_task()` 报错的问题，改为独立 daemon 线程运行自己的事件循环
 
-## [Unreleased]
+## [0.1.7] - 2026-04-03
+
+### Fixed
+- **主动推送冷却机制**：修复发完通知后无冷却期导致频繁重复提醒的问题，新增 `cooldown_minutes`（默认 60 分钟）配置；发完后记录 `last_proactive_at` 时间戳，同会话冷却期内不再触发
+
+### Changed
+- **沉默阈值调高**：`silence_threshold_minutes` 默认值从 60 分钟调整为 90 分钟，减少误触发
 
 <!--
 发版流程：

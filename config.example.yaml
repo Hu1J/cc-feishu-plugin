@@ -16,9 +16,10 @@ proactive:
   enabled: true           # 主动推送功能开关
   time_window_start: "08:00"              # 可推送时间窗口开始（本地时间 HH:MM）
   time_window_end: "22:00"                # 可推送时间窗口结束
-  silence_threshold_minutes: 60           # 沉默超过此分钟数后触发推送
+  silence_threshold_minutes: 90           # 沉默超过此分钟数后触发推送
   check_interval_minutes: 5               # 检查间隔
   max_per_day: 3                          # 每天最多推送次数，0 表示不限
+  cooldown_minutes: 60                   # 发完一条后，同会话冷却分钟数，期间不再触发
 
 storage:
   db_path: ./data/sessions.db

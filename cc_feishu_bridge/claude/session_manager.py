@@ -25,6 +25,7 @@ class Session:
     last_message_at: datetime | None = None
     proactive_today_count: int = 0
     proactive_today_date: str | None = None   # YYYY-MM-DD 格式
+    last_proactive_at: datetime | None = None  # 发完主动推送后，记录时间戳，用于冷却期判断
 
 
 class SessionManager:
@@ -74,6 +75,11 @@ class SessionManager:
             # Migrate: add proactive_today_date column if it doesn't exist
             try:
                 conn.execute("ALTER TABLE sessions ADD COLUMN proactive_today_date TEXT")
+            except sqlite3.OperationalError:
+                pass
+            # Migrate: add last_proactive_at column if it doesn't exist
+            try:
+                conn.execute("ALTER TABLE sessions ADD COLUMN last_proactive_at TIMESTAMP")
             except sqlite3.OperationalError:
                 pass
             conn.execute("""
@@ -138,6 +144,7 @@ class SessionManager:
                 last_message_at=datetime.fromisoformat(row["last_message_at"]) if row["last_message_at"] else None,
                 proactive_today_count=row["proactive_today_count"],
                 proactive_today_date=row["proactive_today_date"],
+                last_proactive_at=datetime.fromisoformat(row["last_proactive_at"]) if row["last_proactive_at"] else None,
             )
         return None
 
@@ -208,6 +215,7 @@ class SessionManager:
                     last_message_at=datetime.fromisoformat(row["last_message_at"]) if row["last_message_at"] else None,
                     proactive_today_count=row["proactive_today_count"],
                     proactive_today_date=row["proactive_today_date"],
+                    last_proactive_at=datetime.fromisoformat(row["last_proactive_at"]) if row["last_proactive_at"] else None,
                 )
             return None
 
@@ -249,6 +257,7 @@ class SessionManager:
                 last_message_at=datetime.fromisoformat(row["last_message_at"]),
                 proactive_today_count=row["proactive_today_count"],
                 proactive_today_date=row["proactive_today_date"],
+                last_proactive_at=datetime.fromisoformat(row["last_proactive_at"]) if row["last_proactive_at"] else None,
             )
             for row in rows
         ]
@@ -263,4 +272,12 @@ class SessionManager:
                        proactive_today_date = ?
                    WHERE session_id = ?""",
                 (today, session_id),
+            )
+
+    def update_last_proactive_at(self, session_id: str) -> None:
+        """Record the timestamp when a proactive message was sent (for cooldown tracking)."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """UPDATE sessions SET last_proactive_at = ? WHERE session_id = ?""",
+                (datetime.utcnow().isoformat(), session_id),
             )
