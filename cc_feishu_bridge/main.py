@@ -468,6 +468,15 @@ def main(args=None):
     send_parser.add_argument("files", nargs="+", help="Path(s) to the file(s) to send")
     send_parser.add_argument("--config", required=True, help="Path to config.yaml for this bridge instance")
 
+    switch_parser = subparsers.add_parser(
+        "switch",
+        help="Switch to another project's bridge instance",
+    )
+    switch_parser.add_argument(
+        "target",
+        help="Target project directory (absolute or relative path)",
+    )
+
     args = parser.parse_args(args)
 
     # Print banner before any logging setup
@@ -498,6 +507,19 @@ def main(args=None):
     if command == "send":
         from cc_feishu_bridge.main import run_send_command
         run_send_command(args.files, args.config)
+        return
+
+    if command == "switch":
+        from cc_feishu_bridge.switcher import switch_to, SwitchError
+        import os
+        # Resolve relative paths relative to cwd
+        target = os.path.abspath(args.target)
+        result = switch_to(target)
+        if result.success:
+            print(f"✅ 切换成功。目标 PID: {result.target_pid}")
+        else:
+            print(f"❌ 切换失败 [{result.error_step}]: {result.error_message}")
+            sys.exit(1)
         return
 
     # Default: start
