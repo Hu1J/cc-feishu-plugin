@@ -284,7 +284,6 @@ class MessageHandler:
     async def _handle_switch(self, message: IncomingMessage) -> HandlerResult:
         """Handle /switch <target-path> command."""
         from cc_feishu_bridge.switcher import switch_to, SwitchResult
-        import os
 
         parts = message.content.split(maxsplit=1)
         if len(parts) < 2:
@@ -302,7 +301,13 @@ class MessageHandler:
 
         await self.feishu.add_typing_reaction(message.message_id)
 
-        result: SwitchResult = switch_to(target)
+        try:
+            result: SwitchResult = switch_to(target)
+        except Exception as e:
+            return HandlerResult(
+                success=True,
+                response_text=f"❌ 切换异常\n\n**原因**: {e}",
+            )
 
         if result.success:
             card_md = (
