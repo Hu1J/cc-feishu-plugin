@@ -34,13 +34,6 @@ class StorageConfig:
 
 
 @dataclass
-class ServerConfig:
-    host: str = "0.0.0.0"
-    port: int = 8080
-    webhook_path: str = "/feishu/webhook"
-
-
-@dataclass
 class ProactiveConfig:
     enabled: bool = True
     time_window_start: str = "08:00"   # HH:MM 格式
@@ -57,7 +50,6 @@ class Config:
     auth: AuthConfig
     claude: ClaudeConfig
     storage: StorageConfig
-    server: ServerConfig
     proactive: ProactiveConfig = field(default_factory=ProactiveConfig)
     data_dir: str = ""
     bypass_accepted: bool = False
@@ -95,7 +87,6 @@ def load_config(path: str, data_dir: str = "") -> Config:
         auth=AuthConfig(**raw.get("auth", {})),
         claude=ClaudeConfig(**raw.get("claude", {})),
         storage=StorageConfig(**raw.get("storage", {})),
-        server=ServerConfig(**raw.get("server", {})),
         proactive=proactive,
         data_dir=data_dir,
         bypass_accepted=raw.get("bypass_accepted", False),
@@ -108,7 +99,6 @@ def save_config(path: str, feishu_app_id: str, feishu_app_secret: str,
                 claude_cli_path: str, claude_max_turns: int,
                 claude_approved_directory: str,
                 storage_db_path: str,
-                server_host: str, server_port: int, server_webhook_path: str,
                 bypass_accepted: bool = False) -> None:
     """Save a complete config to a YAML file."""
     config = {
@@ -128,11 +118,6 @@ def save_config(path: str, feishu_app_id: str, feishu_app_secret: str,
         },
         "storage": {
             "db_path": storage_db_path,
-        },
-        "server": {
-            "host": server_host,
-            "port": server_port,
-            "webhook_path": server_webhook_path,
         },
         "proactive": {
             "enabled": True,

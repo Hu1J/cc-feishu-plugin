@@ -77,11 +77,6 @@ def save_config(result: AppRegistrationResult, config_path: str, bypass_accepted
         "storage": {
             "db_path": str(Path(config_path).resolve().parent / "sessions.db"),
         },
-        "server": {
-            "host": "0.0.0.0",
-            "port": 8080,
-            "webhook_path": "/feishu/webhook",
-        },
         "bypass_accepted": bypass_accepted,
     }
 

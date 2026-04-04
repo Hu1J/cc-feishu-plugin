@@ -117,11 +117,6 @@ claude:
 
 storage:
   db_path: .cc-feishu-bridge/sessions.db
-
-server:
-  host: "0.0.0.0"
-  port: 8080
-  webhook_path: /feishu/webhook
 ```
 
 ## 多开实例
