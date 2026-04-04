@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import pytest
+# edited by bridge test
 from cc_feishu_bridge.format.edit_diff import (
     colorize_diff,
     _lcs_diff,
@@ -68,19 +68,17 @@ class TestFormatCard:
         assert "body" in card
         elements = card["body"]["elements"]
         assert elements[0]["tag"] == "markdown"
-        assert "background_color" in elements[1]
+        assert elements[1]["tag"] == "markdown"
 
     def test_edit_card_annotated_text_coloring(self):
         diff = colorize_diff("foo", "bar")
         card = format_edit_card("/tmp/test.txt", diff)
-        diff_element = card["body"]["elements"][1]["fields"][0]["text"]
-        assert diff_element["tag"] == "annotated_text"
-        # First segment is deletion (- foo), second is insertion (+ bar)
-        assert len(diff_element["elements"]) == 2
-        assert diff_element["elements"][0]["content"] == "- foo"
-        assert diff_element["elements"][0]["color"] == "red"
-        assert diff_element["elements"][1]["content"] == "+ bar"
-        assert diff_element["elements"][1]["color"] == "green"
+        md_element = card["body"]["elements"][1]
+        assert md_element["tag"] == "markdown"
+        content = md_element["content"]
+        # Diff lines should be colored with font tags and line numbers
+        assert "<font color='red'>1 │ - foo</font>" in content
+        assert "<font color='green'>2 │ + bar</font>" in content
 
     def test_write_card_structure(self):
         card = format_write_card("/tmp/test.txt", ["line1", "line2"])

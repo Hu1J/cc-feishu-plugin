@@ -1,5 +1,11 @@
-"""Banner — terminal ASCII art and log file header."""
 from __future__ import annotations
+
+"""Banner — terminal ASCII art and log file header.
+
+This module provides ASCII art banners and formatting utilities.
+"""
+
+VERSION = "0.2.0"
 
 import sys
 from datetime import datetime
@@ -11,7 +17,7 @@ GREEN = "\033[32m"
 RESET = "\033[0m"
 
 TERMINAL_ART = """{RED}========================================{RESET}
-  {RED}cc-feishu-bridge  v{version}{RESET}
+  {RED}cc-feishu-bridge  v{version} 🚀{RESET}
   {GREEN}started at {timestamp}{RESET}
 {RED}========================================{RESET}
 

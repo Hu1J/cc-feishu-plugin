@@ -353,16 +353,41 @@ class MessageHandler:
                     # _DiffMarker / list[_DiffMarker] → 彩色卡片；其他 → backtick 格式
                     if isinstance(result, _DiffMarker):
                         for card in result.card if isinstance(result.card, list) else [result.card]:
-                            await self.feishu.send_edit_diff_card(
-                                message.chat_id, card, message.message_id, log_reply=False
-                            )
+                            try:
+                                await self.feishu.send_edit_diff_card(
+                                    message.chat_id, card, message.message_id, log_reply=False
+                                )
+                            except Exception:
+                                # 卡片发送失败，降级为带图标的纯文本
+                                import json
+                                try:
+                                    data = json.loads(result.tool_input)
+                                    file_path = data.get("file_path", "unknown")
+                                    icon = "✏️" if result.tool_name == "Edit" else "📝"
+                                    fallback = f"{icon} **{result.tool_name}** — `{file_path}`"
+                                except Exception:
+                                    fallback = f"🤖 **{result.tool_name}**\n`{result.tool_input[:500]}`"
+                                logger.warning(f"send_edit_diff_card failed, falling back to: {fallback}")
+                                await self._safe_send(message.chat_id, message.message_id, fallback, log_reply=False)
                     elif isinstance(result, list):
                         for marker in result:
                             if isinstance(marker, _DiffMarker):
                                 for card in marker.card if isinstance(marker.card, list) else [marker.card]:
-                                    await self.feishu.send_edit_diff_card(
-                                        message.chat_id, card, message.message_id, log_reply=False
-                                    )
+                                    try:
+                                        await self.feishu.send_edit_diff_card(
+                                            message.chat_id, card, message.message_id, log_reply=False
+                                        )
+                                    except Exception:
+                                        import json
+                                        try:
+                                            data = json.loads(marker.tool_input)
+                                            file_path = data.get("file_path", "unknown")
+                                            icon = "✏️" if marker.tool_name == "Edit" else "📝"
+                                            fallback = f"{icon} **{marker.tool_name}** — `{file_path}`"
+                                        except Exception:
+                                            fallback = f"🤖 **{marker.tool_name}**\n`{marker.tool_input[:500]}`"
+                                        logger.warning(f"send_edit_diff_card failed, falling back to: {fallback}")
+                                        await self._safe_send(message.chat_id, marker.message_id, fallback, log_reply=False)
                     else:
                         await self._safe_send(message.chat_id, message.message_id, result, log_reply=False)
                 elif claude_msg.content:
@@ -422,6 +447,7 @@ class MessageHandler:
             await self._safe_send(message.chat_id, message.message_id, "🛑 已打断 Claude。")
         except Exception as e:
             logger.exception(f"Error in _run_query: {e}")
+            await self._safe_send(message.chat_id, message.message_id, f"⚠️ 内部错误：{e}")
         finally:
             if reaction_id:
                 logger.info(f"[typing] off — user={message.user_open_id}, reaction_id={reaction_id!r}")

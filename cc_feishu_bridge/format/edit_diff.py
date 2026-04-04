@@ -98,37 +98,34 @@ def _truncate_diff(diff: list[DiffLine]) -> list[DiffLine]:
     return keep_head + [DiffLine("context", "...")] + keep_tail
 
 
-def _annotated_text_segment(content: str, color: str) -> dict:
-    """单个带颜色的文本片段（用于 annotated_text）。"""
-    return {"tag": "plain_text", "content": content, "color": color}
-
-
-def _annotated_diff_text(diff_lines: list[DiffLine]) -> dict:
-    """构建 annotated_text element，每行独立着色。"""
-    segments = []
-    for d in diff_lines:
-        seg_content = f"{d.prefix()}{d.content}"
-        segments.append(_annotated_text_segment(seg_content, d.color()))
-    return {
-        "tag": "annotated_text",
-        "elements": segments,
-    }
+def _format_diff_lark_md(diff_lines: list[DiffLine]) -> str:
+    """将 diff_lines 格式化为 lark_md 文本，每行带行号和颜色标签。"""
+    parts = []
+    for i, d in enumerate(diff_lines, 1):
+        line = f"{d.prefix()}{d.content}"
+        if d.type == "deletion":
+            colored = f"<font color='red'>{i} │ {line}</font>"
+        elif d.type == "insertion":
+            colored = f"<font color='green'>{i} │ {line}</font>"
+        else:
+            colored = f"{i} │ {line}"
+        parts.append(colored)
+    return "\n".join(parts)
 
 
 def format_edit_card(file_path: str, diff_lines: list[DiffLine]) -> dict:
-    """构建 Edit 工具的飞书彩色 diff 卡片。"""
-    # Header：用 markdown element 支持 `code` 语法
-    header_md = f"**Edit** — `{file_path}`"
+    """构建 Edit 工具的飞书 diff 卡片。"""
+    header_md = f"✏️ **Edit** — `{file_path}`"
+    diff_md = _format_diff_lark_md(diff_lines)
     elements = [
         {
             "tag": "markdown",
             "content": header_md,
         },
         {
-            "tag": "div",
-            "fields": [{"text": _annotated_diff_text(diff_lines)}],
-            "background_color": "#1e1e1e",
-        }
+            "tag": "markdown",
+            "content": diff_md,
+        },
     ]
     return {
         "schema": "2.0",
@@ -138,19 +135,19 @@ def format_edit_card(file_path: str, diff_lines: list[DiffLine]) -> dict:
 
 
 def format_write_card(file_path: str, content_lines: list[str]) -> dict:
-    """构建 Write 工具的飞书全量绿色卡片。"""
+    """构建 Write 工具的飞书全量卡片。"""
     diff_lines = [DiffLine("insertion", line) for line in content_lines]
-    header_md = f"**Write** — `{file_path}`"
+    header_md = f"📝 **Write** — `{file_path}`"
+    diff_md = _format_diff_lark_md(diff_lines)
     elements = [
         {
             "tag": "markdown",
             "content": header_md,
         },
         {
-            "tag": "div",
-            "fields": [{"text": _annotated_diff_text(diff_lines)}],
-            "background_color": "#1e1e1e",
-        }
+            "tag": "markdown",
+            "content": diff_md,
+        },
     ]
     return {
         "schema": "2.0",
