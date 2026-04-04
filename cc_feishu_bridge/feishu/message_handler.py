@@ -14,6 +14,7 @@ from cc_feishu_bridge.security.validator import SecurityValidator
 from cc_feishu_bridge.claude.integration import ClaudeIntegration
 from cc_feishu_bridge.claude.session_manager import SessionManager
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
+from cc_feishu_bridge.format.edit_diff import _DiffMarker
 
 logger = logging.getLogger(__name__)
 
@@ -343,15 +344,21 @@ class MessageHandler:
             async def stream_callback(claude_msg):
                 if claude_msg.tool_name:
                     await accumulator.flush()
-                    tool_text = self.formatter.format_tool_call(
+                    result = self.formatter.format_tool_call(
                         claude_msg.tool_name,
                         claude_msg.tool_input,
                     )
-                    tool_input_display = (claude_msg.tool_input or "")[:200]
-                    if len(claude_msg.tool_input or "") > 200:
-                        tool_input_display += "..."
-                    logger.info(f"[stream] tool: {claude_msg.tool_name} | input: {tool_input_display}")
-                    await self._safe_send(message.chat_id, message.message_id, tool_text, log_reply=False)
+                    logger.info(f"[stream] tool: {claude_msg.tool_name} | input: {claude_msg.tool_input}")
+
+                    # _DiffMarker → 彩色卡片；其他 → backtick 格式
+                    if isinstance(result, _DiffMarker):
+                        cards = result.card if isinstance(result.card, list) else [result.card]
+                        for card in cards:
+                            await self.feishu.send_edit_diff_card(
+                                message.chat_id, card, message.message_id, log_reply=False
+                            )
+                    else:
+                        await self._safe_send(message.chat_id, message.message_id, result, log_reply=False)
                 elif claude_msg.content:
                     logger.info(f"[stream] text: {claude_msg.content[:100]}")
                     await accumulator.add_text(claude_msg.content)

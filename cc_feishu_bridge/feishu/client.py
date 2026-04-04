@@ -471,6 +471,19 @@ class FeishuClient:
         }
         return await self.send_interactive(chat_id, card, reply_to_message_id)
 
+    async def send_edit_diff_card(
+        self,
+        chat_id: str,
+        card: dict,
+        reply_to_message_id: str,
+        log_reply: bool = True,
+    ) -> str:
+        """Send a pre-built colored diff card as a threaded reply."""
+        msg_id = await self.send_interactive(chat_id, card, reply_to_message_id)
+        if log_reply:
+            logger.info(f"Replied diff card to {reply_to_message_id} in chat {chat_id}: {msg_id}")
+        return msg_id
+
     async def send_image_reply(
         self,
         chat_id: str,

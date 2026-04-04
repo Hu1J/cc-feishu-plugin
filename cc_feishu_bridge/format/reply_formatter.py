@@ -1,7 +1,10 @@
 """Format Claude's Markdown response for Feishu."""
 from __future__ import annotations
 
+import json
 import re
+
+from cc_feishu_bridge.format.edit_diff import build_edit_marker, build_write_marker, _DiffMarker
 
 FEISHU_MAX_MESSAGE_LENGTH = 4096
 # Feishu CardKit limit for markdown tables per card
@@ -164,16 +167,36 @@ class ReplyFormatter:
         text = optimize_markdown_style(text, card_version=2)
         return text.strip()
 
-    def format_tool_call(self, tool_name: str, tool_input: str | None = None) -> str:
-        """Format a tool call notification for the user."""
+    def format_tool_call(self, tool_name: str, tool_input: str | None = None) -> str | _DiffMarker:
+        """Format a tool call notification for the user.
+
+        Returns _DiffMarker for Edit/Write tools (to trigger colored card rendering),
+        or a plain string for all other tools.
+        """
+        if tool_input is None:
+            tool_input = ""
+
+        # Edit / Write → 彩色 diff 卡片
+        if tool_name == "Edit":
+            if tool_input.strip():
+                try:
+                    return build_edit_marker(tool_input)
+                except (json.JSONDecodeError, KeyError):
+                    pass  # 降级到 backtick 格式
+        elif tool_name == "Write":
+            if tool_input.strip():
+                try:
+                    return build_write_marker(tool_input)
+                except (json.JSONDecodeError, KeyError):
+                    pass  # 降级到 backtick 格式
+
+        # 其他工具 → backtick 格式（原有逻辑）
         icon = self.tool_icons.get(tool_name, "🤖")
         msg = f"{icon} **{tool_name}**"
         if tool_input:
-            # Send complete input to Feishu (split if needed to respect message limit)
             if len(tool_input) <= FEISHU_MAX_MESSAGE_LENGTH - len(msg) - 5:
                 msg += f"\n`{tool_input}`"
             else:
-                # Split into chunks if tool_input is very long
                 chunks = self.split_messages(tool_input)
                 for chunk in chunks:
                     msg += f"\n`{chunk}`"

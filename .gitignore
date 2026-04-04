@@ -11,3 +11,4 @@ build/
 docs/
 .venv/
 .cc-feishu-bridge/
+.DS_Store

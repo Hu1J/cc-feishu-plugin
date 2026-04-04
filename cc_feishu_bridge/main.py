@@ -418,8 +418,21 @@ def run_send_command(file_paths: list[str], config_path: str) -> None:
 
 
 def main(args=None):
+    # Read version once — shared by --version flag and startup banner
+    try:
+        from importlib.metadata import version as _get_version
+
+        _version = _get_version("cc-feishu-bridge")
+    except Exception:
+        _version = "dev"
+
     parser = argparse.ArgumentParser(
         description="Claude Code Feishu Bridge — data stored in .cc-feishu-bridge/"
+    )
+    parser.add_argument(
+        "-v", "--version",
+        action="version",
+        version=f"cc-feishu-bridge {_version}",
     )
     parser.add_argument(
         "--log-level",
@@ -447,11 +460,6 @@ def main(args=None):
     args = parser.parse_args(args)
 
     # Print banner before any logging setup
-    try:
-        from importlib.metadata import version as get_version
-        _version = get_version("cc-feishu-bridge")
-    except Exception:
-        _version = "dev"
     print_banner(_version)
 
     try:

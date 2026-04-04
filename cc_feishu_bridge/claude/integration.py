@@ -127,7 +127,7 @@ class ClaudeIntegration:
                     tool_name = getattr(block, "name", "Unknown")
                     tool_input = getattr(block, "input", "")
                     if isinstance(tool_input, dict):
-                        tool_input = json.dumps(tool_input)[:200]
+                        tool_input = json.dumps(tool_input, ensure_ascii=False)
                     return ClaudeMessage(
                         content="",
                         is_final=False,

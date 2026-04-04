@@ -25,6 +25,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Changed
 - **沉默阈值调高**：`silence_threshold_minutes` 默认值从 60 分钟调整为 90 分钟，减少误触发
 
+## [0.1.8] - 2026-04-03
+
+### Added
+- **`-v` / `--version` 参数**：支持 `cc-feishu-bridge -v` / `--version` 显示版本号，与 pyproject.toml 版本同步
+
+### Fixed
+- **文件扩展名修复**：接收文件时优先使用原始文件名扩展名，不再被飞书返回的 `file_type` 带跑（例如 txt 文件不会变成 .bin）；同时修正 `guess_file_type` 中 `.txt` → `"stream"` 的错误映射
+
+## [0.1.9] - 2026-04-03
+
+### Fixed
+- **MCP 工具调用中文乱码**：修复 `json.dumps` 默认 `ensure_ascii=True` 导致工具参数中的中文被转义为 Unicode escape 的问题，改为 `ensure_ascii=False` 保留原始中文；同时移除对工具输入日志的截断
+
 <!--
 发版流程：
 1. 在上方 [Unreleased] 区域填入本次变更内容

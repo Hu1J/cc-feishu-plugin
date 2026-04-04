@@ -75,13 +75,17 @@ def make_image_path(data_dir: str, message_id: str) -> str:
 
 
 def make_file_path(data_dir: str, message_id: str, original_name: str, file_type: str) -> str:
-    """生成文件本地存储路径。"""
+    """生成文件本地存储路径。优先从原始文件名取扩展名，飞书 file_type 仅作兜底。"""
     ts = time.strftime("%Y%m%d_%H%M%S")
     safe_name = sanitize_filename(original_name) if original_name else "file"
-    # If safe_name already has an extension, strip it — we'll add the correct one from file_type
-    safe_name = os.path.splitext(safe_name)[0]
-    ext = mime_to_ext(file_type_to_mime(file_type))
-    filename = f"file_{ts}_{message_id}_{safe_name}{ext}"
+    # If safe_name already has an extension, strip it — we'll add the correct one
+    name_without_ext, orig_ext = os.path.splitext(safe_name)
+    # Prefer real extension from original filename; fall back to file_type mapping
+    if orig_ext and orig_ext.lower() in EXT_TO_FILE_TYPE:
+        ext = orig_ext.lower()
+    else:
+        ext = mime_to_ext(file_type_to_mime(file_type))
+    filename = f"file_{ts}_{message_id}_{name_without_ext}{ext}"
     files_dir = os.path.join(data_dir, "received_files")
     os.makedirs(files_dir, exist_ok=True)
     return os.path.join(files_dir, filename)
@@ -104,7 +108,7 @@ EXT_TO_FILE_TYPE = {
     ".ppt": "pptx",
     ".pptx": "pptx",
     ".zip": "zip",
-    ".txt": "stream",
+    ".txt": "txt",
     ".csv": "stream",
     ".md": "stream",
     ".png": "png",
@@ -118,7 +122,7 @@ EXT_TO_FILE_TYPE = {
 
 def guess_file_type(ext: str) -> str:
     """扩展名（如 '.pdf'）→ 飞书 file_type（如 'pdf'）。未知默认 'stream'。"""
-    return EXT_TO_FILE_TYPE.get(ext.lower(), "stream")
+    return EXT_TO_FILE_TYPE.get(ext.lower(), "bin")
 
 
 def make_audio_path(data_dir: str, msg_id: str) -> str:
