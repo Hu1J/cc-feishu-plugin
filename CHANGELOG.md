@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.3] - 2026-04-04
+
+### Changed
+- **日志打印原始消息**：`ws_client.py` 日志字段从 `content`（已提取文本）改为 `raw_content`（原始 JSON 字符串），便于调试音频等特殊消息格式
+
+### Removed
+- **移除 server 配置**：删除了未使用的 `host`/`port`/`webhook` 配置项及其相关代码和 README 文档
+
+### Added
+- **README 文档完善**：新增主动推送功能说明、`/git` 指令使用说明及功能截图展示
+
 ## [0.2.2] - 2026-04-04
 
 ### Added
