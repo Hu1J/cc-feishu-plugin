@@ -81,18 +81,11 @@ def switch_to(target_path: str) -> SwitchResult:
 
 ---
 
-### 2. Skill 文件：`cc-feishu-bridge-switch.md`
+### 2. 飞书内置命令处理
 
-放在 `install/` 目录下，供 AI 在飞书对话中识别和推荐 `/switch` 命令。
+`/switch` 作为内置命令在消息解析层处理，与现有 `/git` 命令同一机制，无需新增 skill 文件。
 
-#### 内容要点
-
-- **用途**：在不丢失当前项目上下文的情况下，切换到另一个项目的 bridge 实例继续工作。
-- **触发词**：`/switch`、`切换项目`、`switch to`
-- **参数**：目标路径（支持绝对路径和相对路径）
-- **时机**：当用户在飞书里表达"我想聊另一个项目"、"切到项目B"等意图时，AI 推荐使用 `/switch`。
-- **限制**：目标项目必须已通过 `cc-feishu-bridge install` 完成初始化，否则提示用户先初始化。
-- **副作用说明**：切换后当前 bridge 进程停止，飞书消息流会短暂中断（目标 bridge 启动后再来消息才会响应）。
+用户在飞书发送 `/switch <目标路径>` → 消息解析拦截 → 调用 `switcher.switch_to()` → 发送结果卡片。
 
 ---
 
@@ -136,9 +129,7 @@ $ cc-feishu-bridge switch ../my-project
 | 操作 | 路径 |
 |---|---|
 | 新增 | `cc_feishu_bridge/switcher.py` — 切换核心逻辑 |
-| 新增 | `install/cc-feishu-bridge-switch.md` — Skill 说明文档 |
-| 修改 | `cc_feishu_bridge/main.py` — 注册 `switch` 子命令 |
-| 修改 | `cc_feishu_bridge/install/__init__.py` — 安装时注册新 skill |
+| 修改 | `cc_feishu_bridge/main.py` — 注册 `switch` 子命令和飞书消息解析拦截 |
 
 ---
 
