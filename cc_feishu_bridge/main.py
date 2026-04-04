@@ -511,7 +511,6 @@ def main(args=None):
 
     if command == "switch":
         from cc_feishu_bridge.switcher import switch_to, SwitchError
-        import os
         # Resolve relative paths relative to cwd
         target = os.path.abspath(args.target)
         result = switch_to(target)
