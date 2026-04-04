@@ -211,7 +211,11 @@ class ReplyFormatter:
         return msg
 
     def _format_bash_tool(self, tool_input: str) -> str:
-        """Format Bash tool call as a markdown code block with description as comment."""
+        """Format Bash tool call as a markdown code block.
+
+        If description exists, append it to the header line.
+        Code block only contains the command.
+        """
         try:
             data = json.loads(tool_input)
         except json.JSONDecodeError:
@@ -222,17 +226,12 @@ class ReplyFormatter:
         description = data.get("description")
 
         icon = self.tool_icons.get("Bash", "💻")
-        header = f"{icon} **Bash**"
-
-        lines = []
         if description:
-            # description 可能有多行，每行都加 # 注释
-            for desc_line in description.splitlines():
-                lines.append(f"# {desc_line}")
-        lines.append(command)
+            header = f"{icon} **Bash** — {description}"
+        else:
+            header = f"{icon} **Bash**"
 
-        body = "\n".join(lines)
-        return f"{header}\n```bash\n{body}\n```"
+        return f"{header}\n```bash\n{command}\n```"
 
     def _format_read_tool(self, tool_input: str) -> str:
         """Format Read tool call as a markdown code block showing the file path."""

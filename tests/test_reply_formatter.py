@@ -46,7 +46,7 @@ def test_format_bash_with_description(formatter):
     import json
     tool_input = json.dumps({"command": "ls -la", "description": "List all files"})
     result = formatter.format_tool_call("Bash", tool_input)
-    assert result == "💻 **Bash**\n```bash\n# List all files\nls -la\n```"
+    assert result == "💻 **Bash** — List all files\n```bash\nls -la\n```"
 
 
 def test_format_bash_without_description(formatter):
@@ -66,8 +66,8 @@ def test_format_bash_multiline_description(formatter):
     import json
     tool_input = json.dumps({"command": "pytest", "description": "Run tests\nVerbose output"})
     result = formatter.format_tool_call("Bash", tool_input)
-    assert "# Run tests" in result
-    assert "# Verbose output" in result
+    assert "**Bash** — Run tests" in result
+    assert "Verbose output" in result
 
 
 def test_format_read_tool(formatter):
