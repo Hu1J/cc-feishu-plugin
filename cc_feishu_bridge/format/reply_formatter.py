@@ -194,6 +194,10 @@ class ReplyFormatter:
         elif tool_name == "Bash":
             return self._format_bash_tool(tool_input)
 
+        # TodoWrite → markdown 表格
+        elif tool_name == "TodoWrite":
+            return self._format_todowrite_tool(tool_input)
+
         # Read → 提取 file_path，用 backtick 包裹
         elif tool_name == "Read":
             return self._format_read_tool(tool_input)
@@ -243,6 +247,27 @@ class ReplyFormatter:
 
         icon = self.tool_icons.get("Read", "📖")
         return f"{icon} **Read**\n`{file_path}`"
+
+    def _format_todowrite_tool(self, tool_input: str) -> str:
+        """Format TodoWrite tool call as a markdown table."""
+        try:
+            data = json.loads(tool_input)
+            todos = data.get("todos", [])
+        except json.JSONDecodeError:
+            todos = []
+
+        if not todos:
+            return "✅ 所有任务已完成！"
+
+        status_icon = {"pending": "⬜", "in_progress": "🔄", "completed": "✅"}
+        rows = ["| 状态 | 待办事项 | 当前动作 |", "|------|----------|----------|"]
+        for t in todos:
+            icon = status_icon.get(t.get("status", "pending"), "⬜")
+            content = t.get("content", "")
+            active = t.get("activeForm", "")
+            rows.append(f"| {icon} | {content} | {active} |")
+
+        return "📋 Todo List\n\n" + "\n".join(rows)
 
     def should_use_card(self, text: str) -> bool:
         """Decide whether to send as Feishu Interactive Card vs post.

@@ -81,3 +81,33 @@ def test_format_read_tool_string_input(formatter):
     # 非 JSON 字符串输入（fallback）
     result = formatter.format_tool_call("Read", "src/main.py")
     assert result == "📖 **Read**\n`src/main.py`"
+
+
+def test_format_todowrite_with_items(formatter):
+    import json
+    tool_input = json.dumps({
+        "todos": [
+            {"content": "Write tests", "status": "completed", "activeForm": "Writing tests"},
+            {"content": "Fix bug", "status": "in_progress", "activeForm": "Fixing bug"},
+            {"content": "Deploy", "status": "pending", "activeForm": "Deploying"},
+        ]
+    })
+    result = formatter.format_tool_call("TodoWrite", tool_input)
+    assert "📋 Todo List" in result
+    assert "| ✅ | Write tests | Writing tests |" in result
+    assert "| 🔄 | Fix bug | Fixing bug |" in result
+    assert "| ⬜ | Deploy | Deploying |" in result
+    assert "✅" in result  # completed items and table header have check icon
+    assert "activeForm" not in result  # actual key name not leaked
+
+
+def test_format_todowrite_empty(formatter):
+    import json
+    tool_input = json.dumps({"todos": []})
+    result = formatter.format_tool_call("TodoWrite", tool_input)
+    assert result == "✅ 所有任务已完成！"
+
+
+def test_format_todowrite_invalid_json(formatter):
+    result = formatter.format_tool_call("TodoWrite", "not json")
+    assert result == "✅ 所有任务已完成！"
