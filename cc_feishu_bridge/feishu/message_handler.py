@@ -283,7 +283,7 @@ class MessageHandler:
 
     async def _handle_switch(self, message: IncomingMessage) -> HandlerResult:
         """Handle /switch <target-path> command."""
-        from cc_feishu_bridge.switcher import switch_to, SwitchError as SwitchErr
+        from cc_feishu_bridge.switcher import run_switch, switch_to, SwitchError as SwitchErr
 
         parts = message.content.split(maxsplit=1)
         if len(parts) < 2:
@@ -300,20 +300,8 @@ class MessageHandler:
 
         await self.feishu.add_typing_reaction(message.message_id)
 
-        # Start progress card
-        progress_md = f"## 🔄 正在切换到 `{target}`\n\n"
-        await self._safe_send(message.chat_id, message.message_id, progress_md)
-
         try:
-            for step in switch_to(target):
-                if step.status == "final":
-                    done_md = f"✅ **{step.label}** `{step.detail}`\n\n> 飞书消息流已切换，请在目标项目下继续对话。\n> 返回时执行 `/switch <当前路径>` 即可。"
-                else:
-                    ticks = "▓" * step.step + "░" * (step.total - step.step)
-                    done_md = f"{ticks} `{step.step}/{step.total}` {step.label} ✓"
-
-                await self._safe_send(message.chat_id, message.message_id, done_md)
-
+            await run_switch(target, self.feishu, message.chat_id, message.message_id)
         except SwitchErr as e:
             await self._safe_send(
                 message.chat_id, message.message_id,

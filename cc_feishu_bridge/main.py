@@ -510,10 +510,31 @@ def main(args=None):
         return
 
     if command == "switch":
-        from cc_feishu_bridge.switcher import switch_to, SwitchError
+        from cc_feishu_bridge.switcher import SwitchError, run_switch_cli
         target = os.path.abspath(args.target)
+
+        # Try to load current project's config + Feishu client for notifications
+        feishu = None
+        chat_id = None
         try:
-            for step in switch_to(target):
+            cfg_path, data_dir = resolve_config_path()
+            config = load_config(cfg_path)
+            db_path = os.path.join(data_dir, "sessions.db")
+
+            from cc_feishu_bridge.feishu.client import FeishuClient
+            from cc_feishu_bridge.claude.session_manager import SessionManager
+            feishu = FeishuClient(
+                app_id=config.feishu.app_id,
+                app_secret=config.feishu.app_secret,
+            )
+            sm = SessionManager(db_path=db_path)
+            session = sm.get_active_session_by_chat_id()
+            chat_id = session.chat_id if session and session.chat_id else None
+        except Exception:
+            pass  # Feishu not available, proceed without notifications
+
+        try:
+            for step in run_switch_cli(target, feishu=feishu, chat_id=chat_id):
                 bar = "━" * (step.step - 1) + "▓" + "░" * (step.total - step.step)
                 if step.status == "final":
                     print(f"\r[{bar}] ✓ {step.label} {step.detail}")

@@ -7,16 +7,37 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import yaml
 
+if TYPE_CHECKING:
+    from cc_feishu_bridge.feishu.client import FeishuClient
+
 
 class SwitchError(Exception): pass
-class NotInitializedError(SwitchError): pass
 class TargetStopError(SwitchError): pass
 class CurrentStopError(SwitchError): pass
 class StartupTimeoutError(SwitchError): pass
+
+
+# Step labels for CLI display (short, single line)
+_CLI_STEP_LABELS = [
+    "停止目标 bridge",
+    "拷贝 config.yaml",
+    "启动目标 bridge",
+    "确认目标 bridge 运行中",
+    "停止当前 bridge",
+]
+
+# Step labels for Feishu messages (detailed, emoji)
+_FEISHU_STEP_LABELS = [
+    "🛑 停止目标 bridge 进程",
+    "📋 拷贝 config.yaml 至目标目录",
+    "🚀 在目标目录启动 bridge",
+    "✅ 确认目标 bridge 运行正常",
+    "🛑 关闭当前 bridge",
+]
 
 
 @dataclass
@@ -111,13 +132,17 @@ def _stop_bridge(project_path: str) -> bool:
 
 
 
-def _copy_and_fix_config(current_path: str, target_path: str) -> None:
-    """Read current config.yaml, rewrite storage.db_path to target's sessions.db, write to target."""
+def _copy_and_fix_config(current_path: str, target_path: str) -> bool:
+    """Read current config.yaml, rewrite storage.db_path and claude.approved_directory to target, write to target.
+
+    Returns True if config was copied, False if current project has no config (skip copy).
+    """
     current_config_path = _config_file_path(current_path)
     target_config_path = _target_config_file_path(target_path)
 
+    # No config in current project — skip copy, target must have/manage its own
     if not os.path.exists(current_config_path):
-        raise SwitchError("当前项目未初始化（无 config.yaml）")
+        return False
 
     with open(current_config_path) as f:
         raw = yaml.safe_load(f)
@@ -130,11 +155,17 @@ def _copy_and_fix_config(current_path: str, target_path: str) -> None:
         raw["storage"] = {}
     raw["storage"]["db_path"] = target_sessions_db
 
+    # Rewrite claude.approved_directory to target path
+    if "claude" not in raw:
+        raw["claude"] = {}
+    raw["claude"]["approved_directory"] = target_path
+
     # Ensure .cc-feishu-bridge dir exists in target
     Path(target_config_path).parent.mkdir(parents=True, exist_ok=True)
 
     with open(target_config_path, "w") as f:
         yaml.dump(raw, f, default_flow_style=False, allow_unicode=True)
+    return True
 
 
 def _start_bridge(target_path: str, timeout: float = 8.0) -> int:
@@ -182,7 +213,7 @@ def switch_to(target_path: str):
 
     Steps (stops on error, no rollback):
     1. Stop target bridge (if running)
-    2. Copy config.yaml to target (rewrite storage.db_path)
+    2. Copy config.yaml to target (rewrite storage.db_path) — skipped if current project not initialized
     3. Start bridge in target
     4. Verify target bridge is running
     5. Stop current bridge
@@ -193,19 +224,19 @@ def switch_to(target_path: str):
     current_path = os.getcwd()
 
     # Step 1: Stop target bridge
-    yield SwitchStep(step=1, total=5, label="停止目标 bridge", status="done")
+    yield SwitchStep(step=1, total=5, label=_CLI_STEP_LABELS[0], status="done")
     if not _stop_bridge(target_path):
         raise TargetStopError(f"无法停止目标 bridge")
 
-    # Step 2: Copy and fix config.yaml
-    yield SwitchStep(step=2, total=5, label="拷贝配置文件", status="done")
+    # Step 2: Copy and fix config.yaml (skipped if current project not initialized)
+    yield SwitchStep(step=2, total=5, label=_CLI_STEP_LABELS[1], status="done")
     try:
-        _copy_and_fix_config(current_path, target_path)
+        copied = _copy_and_fix_config(current_path, target_path)
     except Exception as e:
         raise SwitchError(f"无法拷贝配置文件到目标: {e}")
 
     # Step 3: Start target bridge
-    yield SwitchStep(step=3, total=5, label="启动目标 bridge", status="done")
+    yield SwitchStep(step=3, total=5, label=_CLI_STEP_LABELS[2], status="done")
     target_pid: Optional[int] = None
     try:
         target_pid = _start_bridge(target_path)
@@ -213,10 +244,10 @@ def switch_to(target_path: str):
         raise StartupTimeoutError(f"目标 bridge 启动超时: {e}")
 
     # Step 4: Verify target bridge is running
-    yield SwitchStep(step=4, total=5, label="确认目标 bridge 运行中", status="done", detail=f"PID {target_pid}")
+    yield SwitchStep(step=4, total=5, label=_CLI_STEP_LABELS[3], status="done", detail=f"PID {target_pid}")
 
     # Step 5: Stop current bridge
-    yield SwitchStep(step=5, total=5, label="停止当前 bridge", status="done")
+    yield SwitchStep(step=5, total=5, label=_CLI_STEP_LABELS[4], status="done")
     if not _stop_bridge(current_path):
         raise CurrentStopError(f"无法停止当前 bridge")
 
@@ -224,3 +255,104 @@ def switch_to(target_path: str):
                      detail=f"新 bridge PID {target_pid}", success=True, target_pid=target_pid)
 
     return SwitchResult(success=True, target_path=target_path, target_pid=target_pid)
+
+
+async def run_switch(target_path: str, feishu: "FeishuClient",
+                     chat_id: str, reply_to_message_id: str) -> None:
+    """Run the switch with detailed step-by-step Feishu notifications.
+
+    Sends a rich progress card to Feishu, updating it as each step completes.
+    """
+    current_path = os.getcwd()
+    total = 5
+
+    for step_obj in switch_to(target_path):
+        bar = "▓" * step_obj.step + "░" * (total - step_obj.step)
+        label = _FEISHU_STEP_LABELS[step_obj.step - 1] if step_obj.step <= len(_FEISHU_STEP_LABELS) else f"步骤 {step_obj.step}"
+
+        if step_obj.status == "final":
+            final_card = (
+                f"## ✅ 切换完成\n\n"
+                f"**目标项目**: `{target_path}`\n"
+                f"**新进程 PID**: `{step_obj.target_pid}`\n\n"
+                f"🎉 飞书消息流已切换到目标项目，继续对话吧！\n\n"
+                f"返回时执行 `/switch {current_path}` 即可切回。"
+            )
+            await feishu.send_interactive_reply(chat_id, final_card, reply_to_message_id)
+        else:
+            progress_card = (
+                f"## 🔄 正在切换项目\n\n"
+                f"**目标**: `{target_path}`\n\n"
+                f"{bar} `{step_obj.step}/{total}` {label}\n\n"
+                f"⏳ 切换中，请稍候..."
+            )
+            await feishu.send_interactive_reply(chat_id, progress_card, reply_to_message_id)
+
+
+def run_switch_cli(target_path: str, feishu=None, chat_id: str | None = None):
+    """CLI version of switch — yields SwitchStep, optionally sends Feishu notifications.
+
+    Args:
+        target_path: target project directory
+        feishu: FeishuClient instance (optional, for notifications)
+        chat_id: Feishu chat_id (optional, required if feishu is provided)
+    """
+    import asyncio
+
+    async def _run_with_feishu():
+        if not feishu or not chat_id:
+            # No Feishu — just yield steps without notifications
+            for step_obj in switch_to(target_path):
+                yield step_obj
+            return
+
+        async def _send(card_md: str):
+            try:
+                await feishu.send_interactive_reply(chat_id, card_md, "")
+            except Exception:
+                pass  # non-fatal, CLI continues
+
+        # Send initial card
+        initial_card = (
+            f"## 🔄 正在切换项目\n\n"
+            f"**目标**: `{target_path}`\n\n"
+            f"⏳ 准备切换，请稍候..."
+        )
+        await _send(initial_card)
+
+        for step_obj in switch_to(target_path):
+            bar = "▓" * step_obj.step + "░" * (5 - step_obj.step)
+            label = _FEISHU_STEP_LABELS[step_obj.step - 1] if step_obj.step <= len(_FEISHU_STEP_LABELS) else f"步骤 {step_obj.step}"
+
+            if step_obj.status == "final":
+                final_card = (
+                    f"## ✅ 切换完成\n\n"
+                    f"**目标项目**: `{target_path}`\n"
+                    f"**新进程 PID**: `{step_obj.target_pid}`\n\n"
+                    f"🎉 飞书消息流已切换到目标项目，继续对话吧！"
+                )
+                await _send(final_card)
+            else:
+                progress_card = (
+                    f"## 🔄 正在切换项目\n\n"
+                    f"**目标**: `{target_path}`\n\n"
+                    f"{bar} `{step_obj.step}/5` {label}\n\n"
+                    f"⏳ 切换中，请稍候..."
+                )
+                await _send(progress_card)
+
+            yield step_obj
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        gen = _run_with_feishu()
+        # Collect and yield items from the async generator using the same event loop
+        try:
+            while True:
+                yielded = loop.run_until_complete(gen.__anext__())
+                yield yielded
+        except StopAsyncIteration:
+            pass
+    finally:
+        loop.close()
