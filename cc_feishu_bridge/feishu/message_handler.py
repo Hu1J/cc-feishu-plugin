@@ -264,6 +264,7 @@ class MessageHandler:
                     "• /status — 会话状态\n"
                     "• /stop — 打断当前查询\n"
                     "• /git — 显示 Git 状态\n"
+                    "• /switch <路径> — 切换到另一个项目的 bridge\n"
                     "• /help — 显示本帮助"
                 ),
             )
@@ -271,11 +272,58 @@ class MessageHandler:
         elif cmd == "/git":
             return await self._handle_git(message)
 
+        elif cmd == "/switch":
+            return await self._handle_switch(message)
+
         else:
             return HandlerResult(
                 success=True,
                 response_text=f"未知命令: {cmd}",
             )
+
+    async def _handle_switch(self, message: IncomingMessage) -> HandlerResult:
+        """Handle /switch <target-path> command."""
+        from cc_feishu_bridge.switcher import switch_to, SwitchResult
+        import os
+
+        parts = message.content.split(maxsplit=1)
+        if len(parts) < 2:
+            return HandlerResult(
+                success=True,
+                response_text="用法: /switch <目标项目路径>\n例: /switch /Users/x/my-project",
+            )
+
+        raw_path = parts[1].strip()
+        # Resolve relative paths against current cwd
+        if raw_path.startswith("/") or raw_path.startswith("~"):
+            target = os.path.expanduser(raw_path)
+        else:
+            target = os.path.abspath(raw_path)
+
+        await self.feishu.add_typing_reaction(message.message_id)
+
+        result: SwitchResult = switch_to(target)
+
+        if result.success:
+            card_md = (
+                f"## ✅ 已切换到新项目\n\n"
+                f"| 项目 | 值 |\n"
+                f"|------|-----|\n"
+                f"| 目标目录 | `{target}` |\n"
+                f"| 新 Bridge PID | `{result.target_pid}` |\n\n"
+                f"> 飞书消息流已切换，请在目标项目下继续对话。\n"
+                f"> 返回时执行 `/switch <当前路径>` 即可。"
+            )
+            await self._safe_send(message.chat_id, message.message_id, card_md)
+            return HandlerResult(success=True, response_text="")
+        else:
+            error_text = (
+                f"❌ 切换失败\n\n"
+                f"**失败步骤**: {result.error_step}\n\n"
+                f"**原因**: {result.error_message}"
+            )
+            await self._safe_send(message.chat_id, message.message_id, error_text)
+            return HandlerResult(success=True, response_text="")
 
     async def _run_query(
         self,
