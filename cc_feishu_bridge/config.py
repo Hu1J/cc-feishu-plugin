@@ -56,23 +56,33 @@ class Config:
 
 
 def _upgrade_config(path: str) -> None:
-    """Auto-upgrade config.yaml if proactive section is missing."""
+    """Auto-upgrade config.yaml: add proactive section if missing, remove stale server section."""
     with open(path) as f:
         raw = yaml.safe_load(f)
-    if "proactive" in raw:
-        return
-    default_proactive = {
-        "enabled": True,
-        "time_window_start": "08:00",
-        "time_window_end": "22:00",
-        "silence_threshold_minutes": 90,
-        "check_interval_minutes": 5,
-        "max_per_day": 3,
-        "cooldown_minutes": 60,
-    }
-    raw["proactive"] = default_proactive
-    with open(path, "w") as f:
-        yaml.dump(raw, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+    changed = False
+
+    # Add proactive section if missing
+    if "proactive" not in raw:
+        raw["proactive"] = {
+            "enabled": True,
+            "time_window_start": "08:00",
+            "time_window_end": "22:00",
+            "silence_threshold_minutes": 90,
+            "check_interval_minutes": 5,
+            "max_per_day": 3,
+            "cooldown_minutes": 60,
+        }
+        changed = True
+
+    # Remove stale server section (deprecated in v0.2.3)
+    if "server" in raw:
+        del raw["server"]
+        changed = True
+
+    if changed:
+        with open(path, "w") as f:
+            yaml.dump(raw, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
 
 def load_config(path: str, data_dir: str = "") -> Config:
