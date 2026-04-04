@@ -242,7 +242,7 @@ class ReplyFormatter:
             file_path = tool_input
 
         icon = self.tool_icons.get("Read", "📖")
-        return f"{icon} **Read** — `{file_path}`"
+        return f"{icon} **Read**\n`{file_path}`"
 
     def should_use_card(self, text: str) -> bool:
         """Decide whether to send as Feishu Interactive Card vs post.
