@@ -263,9 +263,13 @@ class MessageHandler:
                     "• /new — 新建会话\n"
                     "• /status — 会话状态\n"
                     "• /stop — 打断当前查询\n"
+                    "• /git — 显示 Git 状态\n"
                     "• /help — 显示本帮助"
                 ),
             )
+
+        elif cmd == "/git":
+            return await self._handle_git(message)
 
         else:
             return HandlerResult(
@@ -462,6 +466,74 @@ class MessageHandler:
         self._worker_task.cancel()
         self._worker_task = None
         await self._safe_send(message.chat_id, message.message_id, "🛑 已发送停止信号，Claude 将中断当前任务。")
+        return HandlerResult(success=True)
+
+    async def _handle_git(self, message: IncomingMessage) -> HandlerResult:
+        """执行 git status 和 log，返回精美卡片。"""
+        import subprocess
+
+        def run_git(args: list[str], cwd: str | None = None) -> str:
+            try:
+                result = subprocess.run(
+                    ["git"] + args,
+                    capture_output=True, text=True, timeout=10,
+                    cwd=cwd or os.getcwd()
+                )
+                return result.stdout.strip()
+            except Exception:
+                return ""
+
+        # 当前分支
+        branch = run_git(["branch", "--show-current"])
+        if not branch:
+            branch = "(无分支)"
+
+        # 变更文件
+        status_output = run_git(["status", "--porcelain"])
+
+        # 最近 5 次提交: 时间 + hash(7位) + 描述
+        log_lines = run_git(["log", "--format=%ci %h %s", "-5"]).splitlines()
+
+        # 渲染 markdown
+        card_lines = ["📊 **Git Status**", "", f"🟢 **{branch}**", "", "📝 **变更文件**"]
+
+        if status_output:
+            status_color = {
+                "M": "red", "D": "red", "A": "green",
+                "R": "yellow", "U": "orange", "?": "grey",
+            }
+            for line in status_output.splitlines():
+                index, worktree = line[:2], line[3:]
+                idx_char = index[0] if index[0] not in (" ", "?") else index[0]
+                wt_char = index[1] if len(index) > 1 and index[1] not in (" ", "?") else index[1]
+                char = wt_char if idx_char == " " else idx_char
+                color = status_color.get(char, "grey")
+                card_lines.append(f"<font color='{color}'>{line[:2]}</font> {line[3:]}")
+
+            card_lines.append("")
+            card_lines.append("📋 **最近提交**")
+            card_lines.append("")
+            card_lines.append("| 时间 | Hash | 描述 |")
+            card_lines.append("|------|------|------|")
+            for log_line in log_lines:
+                parts = log_line.split(" ", 3)
+                if len(parts) >= 4:
+                    dt = parts[0] + " " + parts[1][:5]
+                    h = parts[2]
+                    msg = parts[3]
+                    card_lines.append(f"| {dt} | `{h}` | {msg} |")
+        else:
+            card_lines.append("✅ **工作区干净，无待提交变更**")
+
+        card_body = "\n".join(card_lines)
+
+        try:
+            await self.feishu.send_interactive_reply(
+                message.chat_id, card_body, message.message_id, log_reply=True
+            )
+        except Exception:
+            await self._safe_send(message.chat_id, message.message_id, card_body)
+
         return HandlerResult(success=True)
 
     async def _safe_send(self, chat_id: str, reply_to_message_id: str, text: str, log_reply: bool = True):
