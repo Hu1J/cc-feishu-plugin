@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.0] - 2026-04-04
+
+### Added
+- **Edit/Write 工具彩色 Diff 渲染**：使用飞书 `annotated_text` 逐行着色，红色为删除、绿色为新增、灰色为上下文，大幅提升代码变更可读性
+- **主动联系冷却机制**：新增 `cooldown_minutes` 配置项，避免过于频繁地主动向用户推送消息
+
+### Fixed
+- **工具调用参数中文乱码**：修复 `json.dumps` 默认 `ensure_ascii=True` 导致中文被转义为 Unicode escape 的问题
+- **文件扩展名错误**：修复下载 .txt 和 .csv 文件时被错误保存为 .bin 的问题
+
 ## [0.1.6] - 2026-04-03
 
 ### Added
