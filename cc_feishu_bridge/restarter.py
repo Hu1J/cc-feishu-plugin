@@ -145,6 +145,98 @@ def _restart_to(file_lock=None):
     )
 
 
+async def run_restart(file_lock, feishu: "FeishuClient",
+                      chat_id: str, reply_to_message_id: str) -> None:
+    """Run the restart with detailed step-by-step Feishu notifications.
+
+    Sends a rich progress card to Feishu, updating it as each step completes.
+    """
+    current_path = os.getcwd()
+    total = 4
+
+    for step_obj in _restart_to(file_lock=file_lock):
+        bar = "▓" * step_obj.step + "░" * (total - step_obj.step)
+        label = _FEISHU_STEP_LABELS[step_obj.step - 1] if step_obj.step <= len(_FEISHU_STEP_LABELS) else f"步骤 {step_obj.step}"
+
+        if step_obj.status == "final":
+            final_card = (
+                f"## ✅ 重启完成\n\n"
+                f"**当前目录**: `{current_path}`\n"
+                f"**新进程 PID**: `{step_obj.new_pid}`\n\n"
+                f"🎉 Bridge 已重启，可以在飞书中继续对话了。"
+            )
+            await feishu.send_interactive_reply(chat_id, final_card, reply_to_message_id)
+        else:
+            progress_card = (
+                f"## 🔄 正在重启\n\n"
+                f"**当前目录**: `{current_path}`\n\n"
+                f"{bar} `{step_obj.step}/{total}` {label}\n\n"
+                f"⏳ 即将重启，请稍候..."
+            )
+            await feishu.send_interactive_reply(chat_id, progress_card, reply_to_message_id)
+
+
+def run_restart_cli(file_lock, feishu=None, chat_id: str | None = None):
+    """CLI version of restart — yields RestartStep, optionally sends Feishu notifications.
+
+    Args:
+        file_lock: FileLock object acquired by main.py
+        feishu: FeishuClient instance (optional, for notifications)
+        chat_id: Feishu chat_id (optional, required if feishu is provided)
+    """
+    import asyncio
+
+    async def _run():
+        if not feishu or not chat_id:
+            for step in _restart_to(file_lock=file_lock):
+                yield step
+            return
+
+        async def _send(card_md: str):
+            try:
+                await feishu.send_interactive_reply(chat_id, card_md, "")
+            except Exception:
+                pass  # non-fatal, CLI continues
+
+        # Initial card
+        initial = f"## 🔄 正在重启\n\n⏳ 准备重启，请稍候..."
+        await _send(initial)
+
+        for step_obj in _restart_to(file_lock=file_lock):
+            bar = "▓" * step_obj.step + "░" * (4 - step_obj.step)
+            label = _FEISHU_STEP_LABELS[step_obj.step - 1]
+
+            if step_obj.status == "final":
+                card = (
+                    f"## ✅ 重启完成\n\n"
+                    f"**当前目录**: `{os.getcwd()}`\n"
+                    f"**新进程 PID**: `{step_obj.new_pid}`\n\n"
+                    f"🎉 Bridge 已重启，可以在飞书中继续对话了。"
+                )
+                await _send(card)
+            else:
+                card = (
+                    f"## 🔄 正在重启\n\n"
+                    f"{bar} `{step_obj.step}/4` {label}\n\n"
+                    f"⏳ 即将重启，请稍候..."
+                )
+                await _send(card)
+            yield step_obj
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        gen = _run()
+        try:
+            while True:
+                yielded = loop.run_until_complete(gen.__anext__())
+                yield yielded
+        except StopAsyncIteration:
+            pass
+    finally:
+        loop.close()
+
+
 def _start_bridge(project_path: str, timeout: float = 8.0) -> int:
     """Start the bridge for project using subprocess.Popen with start_new_session=True.
 

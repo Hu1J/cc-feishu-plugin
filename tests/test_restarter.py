@@ -10,6 +10,7 @@ from cc_feishu_bridge.restarter import (
     _CLI_STEP_LABELS,
     _FEISHU_STEP_LABELS,
     _restart_to,
+    run_restart_cli,
 )
 
 
@@ -179,3 +180,77 @@ class TestRestartTo:
             for i, s in enumerate(steps):
                 assert s.step == i + 1
                 assert s.total == 4
+
+
+class TestRunRestartCli:
+    """Tests for run_restart_cli()."""
+
+    def test_no_feishu_yields_steps_from_restart_to(self):
+        """run_restart_cli with feishu=None directly yields steps from _restart_to."""
+        with patch("cc_feishu_bridge.restarter._start_bridge") as mock_start:
+            mock_start.return_value = 12345
+            mock_lock = MagicMock()
+            steps = list(run_restart_cli(file_lock=mock_lock, feishu=None, chat_id=None))
+            assert len(steps) == 4
+            assert steps[-1].status == "final"
+            assert steps[-1].new_pid == 12345
+
+    def test_no_feishu_accepts_only_file_lock(self):
+        """run_restart_cli with feishu=None and no chat_id works."""
+        with patch("cc_feishu_bridge.restarter._start_bridge") as mock_start:
+            mock_start.return_value = 99999
+            mock_lock = MagicMock()
+            steps = list(run_restart_cli(file_lock=mock_lock))
+            assert len(steps) == 4
+            assert steps[-1].new_pid == 99999
+
+    def test_with_feishu_sends_expected_cards(self):
+        """run_restart_cli with mock feishu sends expected progress and final cards."""
+        with patch("cc_feishu_bridge.restarter._start_bridge") as mock_start:
+            mock_start.return_value = 54321
+            mock_lock = MagicMock()
+            mock_feishu = MagicMock()
+
+            sent_cards = []
+            async def mock_send(chat_id, card_md, reply_to):
+                sent_cards.append(card_md)
+
+            mock_feishu.send_interactive_reply = mock_send
+
+            steps = list(run_restart_cli(file_lock=mock_lock, feishu=mock_feishu, chat_id="test_chat"))
+
+            # Should have 5 sends: initial + 4 steps (3 progress + 1 final)
+            assert len(sent_cards) == 5
+            # Initial card
+            assert "🔄 正在重启" in sent_cards[0]
+            assert "⏳ 准备重启，请稍候..." in sent_cards[0]
+            # Progress cards (steps 1-3)
+            assert "🔄 正在重启" in sent_cards[1]
+            assert "░" in sent_cards[1]  # progress bar
+            # Final card
+            assert "✅ 重启完成" in sent_cards[4]
+            assert "54321" in sent_cards[4]  # new_pid
+            assert "🎉 Bridge 已重启" in sent_cards[4]
+
+    def test_feishu_send_error_raises_gracefully(self):
+        """run_restart_cli mock feishu raises gracefully on send error."""
+        with patch("cc_feishu_bridge.restarter._start_bridge") as mock_start:
+            mock_start.return_value = 12345
+            mock_lock = MagicMock()
+            mock_feishu = MagicMock()
+
+            # First call succeeds, second raises
+            call_count = [0]
+            async def mock_send(chat_id, card_md, reply_to):
+                call_count[0] += 1
+                if call_count[0] > 1:
+                    raise RuntimeError("Feishu send failed")
+
+            mock_feishu.send_interactive_reply = mock_send
+
+            # Should not raise - send errors are caught
+            steps = list(run_restart_cli(file_lock=mock_lock, feishu=mock_feishu, chat_id="test_chat"))
+
+            # All steps still yielded despite send error
+            assert len(steps) == 4
+            assert steps[-1].status == "final"
