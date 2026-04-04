@@ -16,7 +16,29 @@ Claude Code 飞书桥接插件 — 在飞书中与本地 Claude Code 对话。
 - **引用回复** — Claude 的每条回复作为引用回复发出，对话结构清晰
 - **引用消息感知** — 引用某条消息发送时，Claude 能感知原文
 - **实时流式推送** — Claude 生成回复时实时推送，工具调用立即 flush，不重复发送
-- **工具调用格式化** — Edit/Write 显示彩色 diff（行号 + 增删着色）；Bash 以代码段展示，description 在标题行；Read 显示文件路径
+- **工具调用精美卡片** — Edit/Write 显示彩色 diff（行号 + 增删着色）；Bash 以代码段展示；Read 显示文件路径；TodoWrite 渲染为待办表格；Git Status 展示状态和最近提交
+
+## 截图展示
+
+### Edit / Write 彩色 Diff
+
+![Edit Diff](docs/screenshots/edit-diff.png)
+
+### Bash 工具
+
+![Bash](docs/screenshots/bash-command.png)
+
+### Git Status
+
+![Git Status](docs/screenshots/git-command.png)
+
+### TodoWrite 待办列表
+
+![TodoWrite](docs/screenshots/todowrite.png)
+
+### 日常对话
+
+![Regular Text](docs/screenshots/regular-text.png)
 
 ## 快速开始
 
