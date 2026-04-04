@@ -500,13 +500,21 @@ class MessageHandler:
         if status_output:
             status_color = {
                 "M": "red", "D": "red", "A": "green",
-                "R": "yellow", "U": "orange", "?": "grey",
+                "R": "yellow", "U": "orange",
             }
             for line in status_output.splitlines():
-                index, worktree = line[:2], line[3:]
-                idx_char = index[0] if index[0] not in (" ", "?") else index[0]
-                wt_char = index[1] if len(index) > 1 and index[1] not in (" ", "?") else index[1]
-                char = wt_char if idx_char == " " else idx_char
+                idx_char = line[0]
+                wt_char = line[1]
+                # 优先取 index 位字符（已暂存），否则取 worktree 位（工作区）
+                if idx_char == "?":
+                    # ?? = untracked，两个都是 ?
+                    char = "?"
+                elif idx_char == " ":
+                    # 只有 worktree 有变化
+                    char = wt_char if wt_char != " " else "?"
+                else:
+                    # index 有字符（已暂存），优先用它
+                    char = idx_char
                 color = status_color.get(char, "grey")
                 card_lines.append(f"<font color='{color}'>{line[:2]}</font> {line[3:]}")
 
