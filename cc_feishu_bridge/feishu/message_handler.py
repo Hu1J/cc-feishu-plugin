@@ -495,10 +495,10 @@ class MessageHandler:
         # %cI = ISO 8601，无空格，split 不易错位
         log_lines = run_git(["log", "--format=%cI %h %s", "-5"]).splitlines()
 
-        # 颜色映射
-        status_color = {
-            "M": "red", "D": "red", "A": "green",
-            "R": "yellow", "U": "orange",
+        # emoji 状态映射（font 标签在卡片内不稳定，改用 emoji）
+        status_icon = {
+            "M": "📝", "D": "🗑️", "A": "➕",
+            "R": "📛", "U": "⚠️", "?": "❓",
         }
 
         # 构建单条 markdown 内容
@@ -518,8 +518,8 @@ class MessageHandler:
                     char = wt_char if wt_char != " " else "?"
                 else:
                     char = idx_char
-                color = status_color.get(char, "grey")
-                card_lines.append(f"<font color='{color}'>{line[:2]}</font> {line[3:]}")
+                icon = status_icon.get(char, "•")
+                card_lines.append(f"{icon}  {line[3:]}")
 
             card_lines.extend([
                 "",
