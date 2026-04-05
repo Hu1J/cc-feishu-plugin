@@ -18,6 +18,8 @@ from pathlib import Path
 
 import filelock
 
+_active_lock: "filelock.FileLock | None" = None
+
 from cc_feishu_bridge.config import load_config, resolve_config_path
 from cc_feishu_bridge.feishu.client import FeishuClient, IncomingMessage
 from cc_feishu_bridge.feishu.ws_client import FeishuWSClient
@@ -223,6 +225,8 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     # Acquire exclusive lock before starting — prevents multiple instances in the same directory
     lock_file = os.path.join(data_dir, ".instance.lock")
     lock = filelock.FileLock(lock_file, timeout=1)
+    global _active_lock
+    _active_lock = lock
     try:
         lock.acquire()
     except filelock.Timeout:
@@ -462,6 +466,9 @@ def main(args=None):
     # stop
     stop_parser = subparsers.add_parser("stop", help="Stop the bridge instance in the current directory")
 
+    restart_parser = subparsers.add_parser("restart", help="Restart current bridge instance")
+    update_parser = subparsers.add_parser("update", help="Check for updates and restart if needed")
+
     # send
     send_parser = subparsers.add_parser("send", help="Send a file or image to the active Feishu chat")
     send_parser.add_argument("files", nargs="+", help="Path(s) to the file(s) to send")
@@ -497,6 +504,43 @@ def main(args=None):
 
     if command == "list":
         list_bridges()
+        return
+
+    if command == "restart":
+        from cc_feishu_bridge.restarter import run_restart_cli, RestartError as RestartErr
+        try:
+            for step in run_restart_cli(_active_lock):
+                bar = "━" * (step.step - 1) + "▓" + "░" * (step.total - step.step)
+                if step.status == "final":
+                    print(f"\r[{bar}] ✓ {step.label} {step.detail}")
+                else:
+                    print(f"\r[{bar}] {step.label}...")
+            print()
+            import os as _os
+            _os._exit(0)
+        except RestartErr as e:
+            print(f"\n❌ 重启失败: {e}")
+            sys.exit(1)
+        return
+
+    if command == "update":
+        from cc_feishu_bridge.restarter import run_update_cli, RestartError as UpdateErr
+        try:
+            for step in run_update_cli(_active_lock):
+                bar = "━" * (step.step - 1) + "▓" + "░" * (step.total - step.step)
+                if step.status == "skip":
+                    print(f"✅ {step.label} {step.detail}")
+                    return
+                if step.status == "final":
+                    print(f"\r[{bar}] ✓ {step.label} {step.detail}")
+                else:
+                    print(f"\r[{bar}] {step.label}...")
+            print()
+            import os as _os
+            _os._exit(0)
+        except UpdateErr as e:
+            print(f"\n❌ 更新失败: {e}")
+            sys.exit(1)
         return
 
     if command == "stop":
