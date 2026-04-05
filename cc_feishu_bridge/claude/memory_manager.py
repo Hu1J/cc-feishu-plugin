@@ -11,7 +11,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-MEMORY_TYPES = ("problem_solution", "project_context", "user_preference", "reference")
+MEMORY_TYPES = ("problem_solution", "project_context", "user_preference")
 
 @dataclass
 class MemoryEntry:
@@ -59,7 +59,7 @@ class MemoryManager:
                 CREATE TABLE IF NOT EXISTS memories (
                     id          TEXT PRIMARY KEY,
                     type        TEXT NOT NULL CHECK(type IN (
-                        'problem_solution','project_context','user_preference','reference'
+                        'problem_solution','project_context','user_preference'
                     )),
                     status      TEXT NOT NULL DEFAULT 'active',
                     title       TEXT NOT NULL,
@@ -146,16 +146,27 @@ class MemoryManager:
             ).fetchall()
         return [MemoryEntry(**{k: v for k, v in dict(row).items() if k != "rank"}) for row in rows]
 
-    def get_by_project(self, project_path: str) -> list[MemoryEntry]:
-        """Get all active memories for a project (including global ones)."""
+    def get_by_project(
+        self,
+        project_path: str,
+        type_filter: list[str] | None = None,
+    ) -> list[MemoryEntry]:
+        """
+        Get all active memories for a project (including global ones).
+        If type_filter is given, only return memories of those types.
+        """
+        if type_filter is None:
+            type_filter = ["user_preference", "project_context"]
+        placeholders = ",".join("?" * len(type_filter))
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute("""
+            rows = conn.execute(f"""
                 SELECT * FROM memories
                 WHERE status = 'active'
+                  AND type IN ({placeholders})
                   AND (project_path IS NULL OR project_path = ?)
                 ORDER BY use_count DESC, created_at DESC
-            """, (project_path,)).fetchall()
+            """, (*type_filter, project_path)).fetchall()
         return [MemoryEntry(**dict(row)) for row in rows]
 
     def delete(self, memory_id: str) -> bool:
@@ -169,24 +180,23 @@ class MemoryManager:
 
     def inject_context(
         self,
-        query: Optional[str] = None,
-        project_path: Optional[str] = None,
-        user_id: Optional[str] = None,
-        limit: int = 5,
+        project_path: str,
+        type_filter: list[str] | None = None,
     ) -> str:
-        """Build a memory context string to prepend to the system prompt."""
-        if query:
-            entries = self.search(query, project_path, user_id, limit)
-        else:
-            entries = self.get_by_project(project_path)[:limit] if project_path is None else []
-
+        """
+        Build a memory context string for passive injection into prompts.
+        Only user_preference and project_context are injected here;
+        problem_solution entries are retrieved on-demand via search().
+        """
+        if project_path is None:
+            return ""
+        entries = self.get_by_project(project_path, type_filter=type_filter)
         if not entries:
             return ""
 
-        lines = ["\n【相关记忆]", "---"]
+        lines = ["\n【项目记忆]", "---"]
         for e in entries:
-            type_label = {"problem_solution": "🔧", "project_context": "📁",
-                          "user_preference": "👤", "reference": "📖"}.get(e.type, "💡")
+            type_label = {"project_context": "📁", "user_preference": "👤"}.get(e.type, "💡")
             lines.append(f"{type_label} **{e.title}**")
             if e.problem:
                 lines.append(f"  问题: {e.problem}")
