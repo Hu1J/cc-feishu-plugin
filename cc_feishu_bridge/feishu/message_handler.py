@@ -541,12 +541,12 @@ async def _handle_update(handler, message: IncomingMessage) -> HandlerResult:
         """执行 git status 和 log，返回精美卡片。"""
         import subprocess
 
-        def run_git(args: list[str], cwd: str | None = None) -> str:
+        def run_git(args: list[str]) -> str:
             try:
                 result = subprocess.run(
                     ["git"] + args,
                     capture_output=True, text=True, timeout=10,
-                    cwd=cwd or os.getcwd()
+                    cwd=self.approved_directory
                 )
                 return result.stdout.strip()
             except Exception:
