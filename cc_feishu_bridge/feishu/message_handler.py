@@ -265,6 +265,8 @@ class MessageHandler:
                     "• /stop — 打断当前查询\n"
                     "• /git — 显示 Git 状态\n"
                     "• /switch <路径> — 切换到另一个项目的 bridge\n"
+                    "• /restart — 重启当前 bridge\n"
+                    "• /update — 检查并更新到最新版本\n"
                     "• /help — 显示本帮助"
                 ),
             )
