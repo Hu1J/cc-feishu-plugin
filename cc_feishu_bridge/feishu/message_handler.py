@@ -280,15 +280,48 @@ class MessageHandler:
             return await self._handle_switch(message)
 
         elif cmd == "/restart":
-            return await _handle_restart(self, message)
+            return await self._handle_restart(message)
         elif cmd == "/update":
-            return await _handle_update(self, message)
+            return await self._handle_update(message)
 
         else:
             return HandlerResult(
                 success=True,
                 response_text=f"未知命令: {cmd}",
             )
+
+
+    async def _handle_restart(self, message: IncomingMessage) -> HandlerResult:
+        from cc_feishu_bridge.restarter import run_restart
+        from cc_feishu_bridge.main import _active_lock
+
+        await self.feishu.add_typing_reaction(message.message_id)
+        try:
+            await run_restart(_active_lock, self.feishu, message.chat_id, message.message_id)
+        except Exception as e:
+            await self._safe_send(
+                message.chat_id, message.message_id,
+                f"❌ 重启失败: {e}"
+            )
+        os._exit(0)
+
+    async def _handle_update(self, message: IncomingMessage) -> HandlerResult:
+        from cc_feishu_bridge.restarter import run_update
+        from cc_feishu_bridge.main import _active_lock
+
+        await self.feishu.add_typing_reaction(message.message_id)
+        did_update = False
+        try:
+            did_update = await run_update(_active_lock, self.feishu, message.chat_id, message.message_id)
+        except Exception as e:
+            await self._safe_send(
+                message.chat_id, message.message_id,
+                f"❌ 更新失败: {e}"
+            )
+        # Only exit if an actual update (pip install) was performed
+        if did_update:
+            os._exit(0)
+        return HandlerResult(success=True)
 
     async def _handle_switch(self, message: IncomingMessage) -> HandlerResult:
         """Handle /switch <target-path> command."""
@@ -320,34 +353,6 @@ class MessageHandler:
         return HandlerResult(success=True, response_text="")
 
 
-async def _handle_restart(handler, message: IncomingMessage) -> HandlerResult:
-    from cc_feishu_bridge.restarter import run_restart
-    from cc_feishu_bridge.main import _active_lock
-
-    await handler.feishu.add_typing_reaction(message.message_id)
-    try:
-        await run_restart(_active_lock, handler.feishu, message.chat_id, message.message_id)
-    except Exception as e:
-        await handler._safe_send(
-            message.chat_id, message.message_id,
-            f"❌ 重启失败: {e}"
-        )
-    os._exit(0)
-
-
-async def _handle_update(handler, message: IncomingMessage) -> HandlerResult:
-    from cc_feishu_bridge.restarter import run_update
-    from cc_feishu_bridge.main import _active_lock
-
-    await handler.feishu.add_typing_reaction(message.message_id)
-    try:
-        await run_update(_active_lock, handler.feishu, message.chat_id, message.message_id)
-    except Exception as e:
-        await handler._safe_send(
-            message.chat_id, message.message_id,
-            f"❌ 更新失败: {e}"
-        )
-    os._exit(0)
 
 
     async def _run_query(

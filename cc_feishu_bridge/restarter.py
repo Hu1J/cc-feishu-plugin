@@ -395,11 +395,14 @@ def _do_update(file_lock=None):
 
 
 async def run_update(file_lock, feishu: "FeishuClient",
-                     chat_id: str, reply_to_message_id: str) -> None:
+                     chat_id: str, reply_to_message_id: str) -> bool:
     """Run the update with detailed step-by-step Feishu notifications.
 
     Sends a rich progress card to Feishu, updating it as each step completes.
     When status == "skip" (already latest), sends an "already latest" card and returns.
+
+    Returns:
+        True if an actual update (pip install) was performed, False if already latest (skipped).
     """
     current_path = os.getcwd()
     total = 7
@@ -412,7 +415,7 @@ async def run_update(file_lock, feishu: "FeishuClient",
                 f"无需更新，继续使用吧。"
             )
             await feishu.send_interactive_reply(chat_id, card, reply_to_message_id)
-            return
+            return False
 
         bar = "▓" * step_obj.step + "░" * (total - step_obj.step)
         label = (_UPDATE_FEISHU_STEP_LABELS[step_obj.step - 1]
@@ -435,6 +438,7 @@ async def run_update(file_lock, feishu: "FeishuClient",
                 f"⏳ 正在更新，请稍候..."
             )
             await feishu.send_interactive_reply(chat_id, progress_card, reply_to_message_id)
+    return True
 
 
 def run_update_cli(file_lock, feishu=None, chat_id: str | None = None):
