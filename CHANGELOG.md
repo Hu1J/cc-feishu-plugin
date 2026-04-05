@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`/update` 飞书指令**：检查 PyPI 最新版本，有更新则下载并自动 restart
 
 ### Removed
-- **CLI 桌面客户端发布**：取消 GitHub Release / PyInstaller / pip script 入口，改为源码安装方式；`/restart` 和 `/update` 指令保留，可通过飞书指令使用
+- **CLI 桌面客户端发布**：取消 GitHub Release 和 PyInstaller 多平台二进制打包，用户通过 pip 或源码安装；`/restart` 和 `/update` 指令保留，通过飞书指令使用
 
 ## [0.2.6] - 2026-04-05
 
