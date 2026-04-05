@@ -55,6 +55,7 @@ jobs:
     environment: pypi
     permissions:
       id-token: write
+      contents: write
     steps:
       - name: Download whl artifact
         uses: actions/download-artifact@v4
@@ -69,7 +70,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
 
       - name: Upload whl to GitHub Release
-        uses: softprops/upload-gh-release@v2
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
