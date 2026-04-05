@@ -767,12 +767,13 @@ def main(args=None):
             for step in run_update_cli(_active_lock):
                 bar = "━" * (step.step - 1) + "▓" + "░" * (step.total - step.step)
                 if step.status == "skip":
-                    print(f"✅ {step.label} {step.detail}")
+                    print(f"✅ 当前版本 {step.detail} 已是最新")
                     return
                 if step.status == "final":
                     print(f"\r[{bar}] ✓ {step.label} {step.detail}")
                 else:
-                    print(f"\r[{bar}] {step.label}...")
+                    detail_str = f"  {step.detail}" if step.detail else ""
+                    print(f"\r[{bar}] {step.label}...{detail_str}")
             print()
             import os as _os
             _os._exit(0)
