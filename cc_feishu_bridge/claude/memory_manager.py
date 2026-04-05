@@ -13,6 +13,14 @@ logger = logging.getLogger(__name__)
 
 MEMORY_TYPES = ("problem_solution", "project_context", "user_preference")
 
+# Injected before user_preference + project_context to guide CC's memory behaviour
+MEMORY_SYSTEM_GUIDE = """
+【记忆系统使用指引】
+遇到报错、构建失败、工具执行异常时，优先用 MemorySearch 搜索本地记忆库。
+解决问题后主动问用户："需要记住吗？" 用户确认后用 MemoryAdd 写入。
+用户说"记住 XXX"时，直接调用 MemoryAdd 写入。
+"""
+
 @dataclass
 class MemoryEntry:
     type: str
