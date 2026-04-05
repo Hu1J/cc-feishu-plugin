@@ -500,14 +500,6 @@ class MessageHandler:
             # to avoid duplication — the streamed content is already there.
             accumulator = StreamAccumulator(message.chat_id, message.message_id, self._safe_send)
 
-            def _tool_icon(name: str) -> str:
-                """Return the appropriate emoji icon for a tool or skill name."""
-                if name == "Edit":
-                    return "✏️"
-                if name.startswith("cc-"):
-                    return "🧰"
-                return "📝"
-
             async def stream_callback(claude_msg):
                 if claude_msg.tool_name:
                     await accumulator.flush()
@@ -530,7 +522,7 @@ class MessageHandler:
                                 try:
                                     data = json.loads(result.tool_input)
                                     file_path = data.get("file_path", "unknown")
-                                    icon = _tool_icon(result.tool_name)
+                                    icon = "✏️" if result.tool_name == "Edit" else ("🧰" if result.tool_name.startswith("cc-") else "📝")
                                     fallback = f"{icon} **{result.tool_name}** — `{file_path}`"
                                 except Exception:
                                     fallback = f"🤖 **{result.tool_name}**\n`{result.tool_input[:500]}`"
@@ -549,7 +541,7 @@ class MessageHandler:
                                         try:
                                             data = json.loads(marker.tool_input)
                                             file_path = data.get("file_path", "unknown")
-                                            icon = _tool_icon(marker.tool_name)
+                                            icon = "✏️" if marker.tool_name == "Edit" else ("🧰" if marker.tool_name.startswith("cc-") else "📝")
                                             fallback = f"{icon} **{marker.tool_name}** — `{file_path}`"
                                         except Exception:
                                             fallback = f"🤖 **{marker.tool_name}**\n`{marker.tool_input[:500]}`"
