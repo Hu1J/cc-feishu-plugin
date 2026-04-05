@@ -1,61 +1,36 @@
 """Memory MCP tools for Claude SDK."""
 from __future__ import annotations
 
-from cc_feishu_bridge.claude.memory_manager import MemoryManager, MemoryEntry
+from cc_feishu_bridge.claude.memory_manager import MemoryManager
 
 
-_TYPE_LABELS = {
-    "problem_solution": "问题解决",
-    "project_context": "项目上下文",
-    "user_preference": "用户偏好",
-}
-
-
-def _format_entry_text(entry: MemoryEntry) -> str:
-    """Format a single entry as plain text (for MemoryAdd confirmation)."""
-    label = _TYPE_LABELS.get(entry.type, entry.type)
-    lines = [f"[{label}] **{entry.title}**"]
-    if entry.problem:
-        lines.append(f"  问题: {entry.problem}")
-    if entry.root_cause:
-        lines.append(f"  根因: {entry.root_cause}")
-    lines.append(f"  解决: {entry.solution}")
-    if entry.tags:
-        lines.append(f"  标签: {entry.tags}")
-    lines.append(f"  ID: `{entry.id}`  使用次数: {entry.use_count}")
+def _format_preference_text(pref) -> str:
+    lines = [f"[用户偏好] **{pref.title}**"]
+    lines.append(f"  {pref.content}")
+    lines.append(f"  关键词: {pref.keywords}")
+    lines.append(f"  ID: `{pref.id}`")
     return "\n".join(lines)
 
 
-def _entries_to_md_table(entries: list[MemoryEntry]) -> str:
-    """Format memory entries as a markdown table."""
-    if not entries:
-        return ""
-    header = "| # | 类型 | 标题 | 问题 | 解决 | ID | 使用次数 |"
-    separator = "|---|---|---|---|---|---|---|"
-    rows = []
-    for i, e in enumerate(entries, 1):
-        label = _TYPE_LABELS.get(e.type, e.type)
-        # Truncate long fields for table cells
-        problem = (e.problem or "")[:40].replace("|", "\\|").replace("\n", " ")
-        solution = (e.solution or "")[:60].replace("|", "\\|").replace("\n", " ")
-        rows.append(
-            f"| {i} | {label} | **{e.title}** | {problem} | {solution} | `{e.id}` | {e.use_count} |"
-        )
-    return "\n".join([header, separator] + rows)
+def _format_memory_text(mem) -> str:
+    lines = [f"[项目记忆] **{mem.title}**"]
+    lines.append(f"  {mem.content}")
+    lines.append(f"  关键词: {mem.keywords}")
+    lines.append(f"  项目: {mem.project_path}")
+    lines.append(f"  ID: `{mem.id}`")
+    return "\n".join(lines)
 
 
 def _build_memory_mcp_server():
     """Build the memory MCP server with all memory management tools."""
     from claude_agent_sdk import tool, create_sdk_mcp_server
 
-    # ── MemorySearch ───────────────────────────────────────────────────────────
-
     @tool(
         "MemorySearch",
         (
-            "搜索本地记忆库，查找之前遇到过的问题和解决方案。"
-            "当你遇到报错、失败或不熟悉的问题时，优先使用此工具查询本地记忆库。"
-            "返回结果包含问题描述、根因和已知解决方案。"
+            "搜索项目记忆库，查找之前遇到过的问题和解决方案。"
+            "只搜当前项目（project_path）下的记忆，不搜用户偏好。"
+            "返回结果包含标题、内容和关键词。"
         ),
         {"query": str, "project_path": str | None},
     )
@@ -70,134 +45,99 @@ def _build_memory_mcp_server():
             }
 
         manager = MemoryManager()
-        results = manager.search(query, project_path=project_path, limit=5)
+        results = manager.search_project_memories(query, project_path=project_path or "", limit=5)
 
         if not results:
             return {
                 "content": [{"type": "text", "text": f"未找到与「{query}」相关的记忆。"}],
             }
 
-        table = _entries_to_md_table([r.entry for r in results])
-        return {
-            "content": [{"type": "text", "text": f"**记忆搜索结果（{len(results)} 条）**\n\n{table}"}],
-        }
+        lines = [f"**项目记忆搜索结果（{len(results)} 条）**", ""]
+        for r in results:
+            m = r.memory
+            lines.append(f"[项目记忆] **{m.title}**")
+            lines.append(f"  {m.content}")
+            lines.append(f"  关键词: {m.keywords}")
+            lines.append(f"  ID: `{m.id}`")
+            lines.append("")
 
-    # ── MemoryList ────────────────────────────────────────────────────────────
-
-    @tool(
-        "MemoryList",
-        (
-            "列出当前项目相关的记忆条目（项目上下文和用户偏好）。"
-            "返回记忆的 ID、标题、类型、使用次数等信息。"
-        ),
-        {"project_path": str | None},
-    )
-    async def memory_list(args: dict) -> dict:
-        project_path = args.get("project_path")
-
-        manager = MemoryManager()
-        entries = manager.get_by_project(project_path=project_path)
-
-        if not entries:
-            return {
-                "content": [{"type": "text", "text": "暂无记忆记录。"}],
-            }
-
-        table = _entries_to_md_table(entries)
-        return {
-            "content": [{"type": "text", "text": f"**记忆列表（{len(entries)} 条）**\n\n{table}"}],
-        }
-
-    # ── MemoryAdd ─────────────────────────────────────────────────────────────
+        return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 
     @tool(
         "MemoryAdd",
         (
-            "向本地记忆库添加一条新的记忆条目。"
-            "适用于记录用户偏好、项目配置、已知问题和解决方案等。"
+            "向记忆库添加新条目。"
+            "用户偏好存入 user_preferences（全局），项目记忆存入 project_memories（按项目隔离）。"
+            "title、content、keywords 三样必填，缺一不可。"
         ),
         {
-            "type": str,  # problem_solution | project_context | user_preference
+            "type": str,  # "user_preference" | "project_memory"
             "title": str,
-            "solution": str,
-            "problem": str | None,
-            "root_cause": str | None,
-            "tags": str | None,
+            "content": str,
+            "keywords": str,
             "project_path": str | None,
         },
     )
     async def memory_add(args: dict) -> dict:
-        entry_type = args.get("type", "project_context")
-        if entry_type not in ("problem_solution", "project_context", "user_preference"):
-            return {
-                "content": [{"type": "text", "text": f"无效的 type：{entry_type}，必须是 problem_solution / project_context / user_preference"}],
-                "is_error": True,
-            }
+        entry_type = args.get("type")
+        title = args.get("title", "").strip()
+        content = args.get("content", "").strip()
+        keywords = args.get("keywords", "").strip()
+        project_path = args.get("project_path")
 
-        entry = MemoryEntry(
-            type=entry_type,
-            title=args.get("title", "")[:60],
-            solution=args.get("solution", ""),
-            problem=args.get("problem"),
-            root_cause=args.get("root_cause"),
-            tags=args.get("tags"),
-            project_path=args.get("project_path"),
-        )
+        if not title:
+            return {"content": [{"type": "text", "text": "标题不能为空"}], "is_error": True}
+        if not content:
+            return {"content": [{"type": "text", "text": "内容不能为空"}], "is_error": True}
+        if not keywords:
+            return {"content": [{"type": "text", "text": "关键词不能为空"}], "is_error": True}
+
         manager = MemoryManager()
-        manager.add(entry)
 
-        return {
-            "content": [{"type": "text", "text": f"✅ 记忆已保存（ID: {entry.id}）\n\n{_format_entry_text(entry)}"}],
-        }
-
-    # ── MemoryDelete ──────────────────────────────────────────────────────────
+        if entry_type == "user_preference":
+            pref = manager.add_preference(title, content, keywords)
+            return {"content": [{"type": "text", "text": f"✅ 用户偏好已保存（ID: {pref.id}）\n\n{_format_preference_text(pref)}"}]}
+        elif entry_type == "project_memory":
+            if not project_path:
+                return {"content": [{"type": "text", "text": "project_memory 需要传入 project_path"}], "is_error": True}
+            mem = manager.add_project_memory(project_path, title, content, keywords)
+            return {"content": [{"type": "text", "text": f"✅ 项目记忆已保存（ID: {mem.id}）\n\n{_format_memory_text(mem)}"}]}
+        else:
+            return {"content": [{"type": "text", "text": f"无效的 type：{entry_type}，必须是 user_preference 或 project_memory"}], "is_error": True}
 
     @tool(
         "MemoryDelete",
-        "删除指定 ID 的记忆条目（软删除）。",
+        "删除指定 ID 的项目记忆。",
         {"memory_id": str},
     )
     async def memory_delete(args: dict) -> dict:
         memory_id = args.get("memory_id", "")
-
         manager = MemoryManager()
-        ok = manager.delete(memory_id)
-
+        ok = manager.delete_project_memory(memory_id)
         if ok:
-            return {
-                "content": [{"type": "text", "text": f"🗑️ 记忆 {memory_id} 已删除。"}],
-            }
-        return {
-            "content": [{"type": "text", "text": f"未找到 ID 为 {memory_id} 的记忆。"}],
-            "is_error": True,
-        }
-
-    # ── MemoryClear ───────────────────────────────────────────────────────────
+            return {"content": [{"type": "text", "text": f"🗑️ 记忆 {memory_id} 已删除。"}]}
+        return {"content": [{"type": "text", "text": f"未找到 ID 为 {memory_id} 的记忆。"}], "is_error": True}
 
     @tool(
         "MemoryClear",
-        "删除当前项目的所有项目上下文记忆（仅删除 project_context 类型，不删除 user_preference 和 problem_solution）。",
+        "清空指定项目下所有项目记忆。",
         {"project_path": str | None},
     )
     async def memory_clear(args: dict) -> dict:
         project_path = args.get("project_path")
-
+        if not project_path:
+            return {"content": [{"type": "text", "text": "需要传入 project_path"}], "is_error": True}
         manager = MemoryManager()
-        entries = manager.get_by_project(project_path=project_path, type_filter=["project_context"])
-        count = sum(1 for e in entries if manager.delete(e.id))
-
-        return {
-            "content": [{"type": "text", "text": f"🧹 已清除 {count} 条项目上下文记忆。"}],
-        }
+        count = manager.clear_project_memories(project_path)
+        return {"content": [{"type": "text", "text": f"🧹 已清除 {count} 条项目记忆。"}]}
 
     return create_sdk_mcp_server(
         name="memory",
         version="1.0.0",
-        tools=[memory_search, memory_list, memory_add, memory_delete, memory_clear],
+        tools=[memory_search, memory_add, memory_delete, memory_clear],
     )
 
 
-# Lazily-created server instance (shared across queries)
 _mcp_server = None
 
 
@@ -210,13 +150,10 @@ def get_memory_mcp_server():
 
 
 MEMORY_SYSTEM_GUIDANCE = """
-当你遇到以下情况时，请优先使用 MemorySearch 工具查询本地记忆库：
+当你遇到以下情况时，请优先使用 MemorySearch 搜索项目记忆：
 - 遇到报错（error）、构建失败（build failed）、测试失败（test failed）
 - 遇到之前似乎见过的问题
-- 用户提到"之前也是这样"、"以前解决过"
 
-MemorySearch 会返回本地记忆库中相关的记录，格式为【问题 + 解决方案】。
-请优先参考返回的解决方案，如果不能直接解决，再自行研究。
-
-也可以使用 MemoryList、MemoryAdd、MemoryDelete、MemoryClear 工具来管理记忆。
+添加记忆时，使用 MemoryAdd（title + content + keywords 三样必填）。
+也可以使用 MemoryDelete、MemoryClear 工具管理记忆。
 """
