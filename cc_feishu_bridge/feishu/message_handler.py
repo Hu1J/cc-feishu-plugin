@@ -328,7 +328,7 @@ async def _handle_restart(handler, message: IncomingMessage) -> HandlerResult:
             message.chat_id, message.message_id,
             f"❌ 重启失败: {e}"
         )
-    _os._exit(0)
+    os._exit(0)
 
 
 async def _handle_update(handler, message: IncomingMessage) -> HandlerResult:
@@ -343,7 +343,7 @@ async def _handle_update(handler, message: IncomingMessage) -> HandlerResult:
             message.chat_id, message.message_id,
             f"❌ 更新失败: {e}"
         )
-    _os._exit(0)
+    os._exit(0)
 
 
     async def _run_query(
