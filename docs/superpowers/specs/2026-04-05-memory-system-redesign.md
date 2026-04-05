@@ -14,6 +14,17 @@
 
 **Tech Stack:** SQLite + FTS5, Python, MCP tools
 
+**Prompt 引导语（MEMORY_SYSTEM_GUIDE）：**
+
+```
+【记忆系统使用指引】
+遇到报错、构建失败、工具执行异常时，优先用 MemorySearch 搜索项目记忆。
+解决问题后主动问用户："需要记住吗？" 用户确认后用 MemoryAdd 写入（标题+内容+关键词三样必填）。
+用户说"记住 XXX"时，直接调用 MemoryAdd 写入。
+```
+
+更新位置：`cc_feishu_bridge/claude/memory_manager.py` 中的 `MEMORY_SYSTEM_GUIDE` 常量。
+
 ---
 
 ## 存储结构
