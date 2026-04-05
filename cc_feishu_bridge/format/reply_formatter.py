@@ -259,10 +259,12 @@ class ReplyFormatter:
             extras.append(f"limit {data['limit']}")
 
         if extras:
-            title = f"**Read** `{file_path}` — " + " — ".join(extras)
+            title = f"**Read** — " + " — ".join(extras)
+            path_line = f"`{file_path}`"
         else:
-            title = f"**Read** `{file_path}`"
-        return f"{icon} {title}"
+            title = f"**Read**"
+            path_line = f"`{file_path}`"
+        return f"{icon} {title}\n{path_line}"
 
     def _format_todowrite_tool(self, tool_input: str) -> str:
         """Format TodoWrite tool call as a markdown table."""
