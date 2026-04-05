@@ -44,6 +44,17 @@ def test_inject_context_returns_all_preferences(mgr):
     assert "我叫狗蛋" in ctx
 
 
+def test_inject_context_format_correctly(mgr):
+    """inject_context 格式正确：标题+内容"""
+    mgr.add_preference("发版规则", "发版前必须确认", "发版,确认")
+    mgr.add_preference("主人信息", "我叫狗蛋", "狗蛋")
+    ctx = mgr.inject_context(project_path="/any/path")
+    assert "【用户偏好】" in ctx
+    assert "发版规则" in ctx
+    assert "发版前必须确认" in ctx
+    assert "主人信息" in ctx
+
+
 def test_inject_context_empty_when_no_preferences(mgr):
     """无用户偏好时返回空字符串"""
     ctx = mgr.inject_context(project_path="/any/path")
