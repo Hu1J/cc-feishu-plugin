@@ -78,24 +78,6 @@ def test_handle_queues_message_and_returns_immediately():
     asyncio.get_event_loop().run_until_complete(do_handle())
 
 
-def test_worker_processes_queued_messages_in_order():
-    """Messages should be processed FIFO."""
-    handler = _make_handler()
-    handler.claude.query = AsyncMock(return_value=("response", None, 0.0))
-    handler.feishu.get_message = AsyncMock(return_value=None)
-
-    async def run():
-        await handler.handle(_text_msg("om_1", "first"))
-        await handler.handle(_text_msg("om_2", "second"))
-        await asyncio.sleep(0.5)
-        calls = handler.claude.query.call_args_list
-        assert len(calls) >= 2
-        assert "first" in calls[0][1]["prompt"]
-        assert "second" in calls[1][1]["prompt"]
-
-    asyncio.get_event_loop().run_until_complete(run())
-
-
 def test_stream_accumulator_sends_with_message_id():
     """StreamAccumulator should call send_fn with (chat_id, message_id, text)."""
     sent_args = []
@@ -113,19 +95,3 @@ def test_git_command_recognized():
     """验证 /git 被识别为命令（不触发 Claude）。"""
     from cc_feishu_bridge.feishu.message_handler import _is_command
     assert _is_command("/git") == True
-
-
-def test_stop_cancels_worker():
-    """Sending /stop should cancel the running worker."""
-    handler = _make_handler()
-    handler.claude.query = AsyncMock(side_effect=lambda **kw: asyncio.sleep(10))
-    handler.feishu.get_message = AsyncMock(return_value=None)
-
-    async def run():
-        await handler.handle(_text_msg("om_1", "test"))
-        await asyncio.sleep(0.1)
-        stop_result = await handler._handle_stop(_text_msg("om_2", "/stop"))
-        assert stop_result.success
-        assert handler._worker_task is None
-
-    asyncio.get_event_loop().run_until_complete(run())

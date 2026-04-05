@@ -8,7 +8,9 @@ Claude Code 飞书桥接插件 — 在飞书中与本地 Claude Code 对话。
 - `/status` — 查看当前会话状态（会话 ID、消息数、累计费用、工作目录）
 - `/stop` — 打断 Claude 当前正在执行的查询
 - `/git` — 显示当前项目 git status 和最近 5 次提交
-- `/switch <目录>` — 切换到另一个项目的 bridge 实例（仅飞书消息指令方式）
+- `/switch <目录>` — 切换到另一个项目的 bridge 实例
+- `/restart` — 重启当前 bridge 实例
+- `/update` — 检查 PyPI 最新版本，如有更新则自动下载并重启
 - `/help` — 查看所有可用命令
 
 ## 核心功能
