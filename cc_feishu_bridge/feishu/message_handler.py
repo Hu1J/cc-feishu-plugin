@@ -12,6 +12,7 @@ from cc_feishu_bridge.feishu.client import FeishuClient, IncomingMessage
 from cc_feishu_bridge.security.auth import Authenticator
 from cc_feishu_bridge.security.validator import SecurityValidator
 from cc_feishu_bridge.claude.integration import ClaudeIntegration
+from cc_feishu_bridge.claude.memory_manager import MemoryManager
 from cc_feishu_bridge.claude.session_manager import SessionManager
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 from cc_feishu_bridge.format.edit_diff import _DiffMarker
@@ -112,6 +113,7 @@ class MessageHandler:
         self.formatter = formatter
         self.approved_directory = approved_directory
         self.data_dir = data_dir
+        self.memory_manager = MemoryManager()
         self._queue: asyncio.Queue[IncomingMessage] | None = None
         self._queue_loop_id: int | None = None
         self._worker_task: asyncio.Task | None = None
@@ -216,7 +218,8 @@ class MessageHandler:
         if session and session.chat_id != message.chat_id:
             self.sessions.update_chat_id(message.user_open_id, message.chat_id)
 
-        await self._run_query(message, session, sdk_session_id)
+        memory_context = self.memory_manager.inject_context(project_path=self.approved_directory)
+        await self._run_query(message, session, sdk_session_id, memory_context)
 
     async def _handle_command(self, message: IncomingMessage) -> HandlerResult:
         """Handle slash commands like /new, /status."""
@@ -269,7 +272,8 @@ class MessageHandler:
                     "• /switch <路径> — 切换到另一个项目的 bridge\n"
                     "• /restart — 重启当前 bridge\n"
                     "• /update — 检查并更新到最新版本\n"
-                    "• /help — 显示本帮助"
+                    "• /help — 显示本帮助\n"
+                    "• /memory — 查看/管理记忆"
                 ),
             )
 
@@ -283,6 +287,9 @@ class MessageHandler:
             return await self._handle_restart(message)
         elif cmd == "/update":
             return await self._handle_update(message)
+
+        elif cmd == "/memory":
+            return await self._handle_memory(message)
 
         else:
             return HandlerResult(
@@ -323,6 +330,75 @@ class MessageHandler:
             os._exit(0)
         return HandlerResult(success=True)
 
+    async def _handle_memory(self, message: IncomingMessage) -> HandlerResult:
+        """Handle /memory command: list, add, search, delete, clear."""
+        parts = message.content.split(maxsplit=2)
+        sub_cmd = parts[1].lower() if len(parts) > 1 else ""
+        sub_arg = parts[2].strip() if len(parts) > 2 else ""
+
+        if sub_cmd == "":
+            # List all memories for current project
+            memories = self.memory_manager.get_by_project(self.approved_directory)
+            if not memories:
+                text = "📭 暂无记忆记录\n\n用 /memory add <内容> 添加第一条记忆"
+            else:
+                lines = [f"📒 当前项目记忆（共 {len(memories)} 条）\n"]
+                for m in memories:
+                    icon = {"problem_solution": "🔧", "project_context": "📁",
+                            "user_preference": "👤", "reference": "📖"}.get(m.type, "💡")
+                    lines.append(f"{icon} **{m.title}**\n   {m.solution[:80]}")
+                text = "\n".join(lines)
+            return HandlerResult(success=True, response_text=text[:2000])
+
+        elif sub_cmd == "add":
+            if not sub_arg:
+                return HandlerResult(success=True,
+                                     response_text="用法: /memory add <记忆内容>")
+            from cc_feishu_bridge.claude.memory_manager import MemoryEntry
+            entry = MemoryEntry(
+                type="user_preference",
+                title=sub_arg[:60],
+                solution=sub_arg,
+                project_path=self.approved_directory,
+            )
+            self.memory_manager.add(entry)
+            return HandlerResult(success=True,
+                                 response_text=f"✅ 记忆已保存\n\n📌 {sub_arg[:100]}")
+
+        elif sub_cmd == "search":
+            if not sub_arg:
+                return HandlerResult(success=True,
+                                     response_text="用法: /memory search <关键词>")
+            results = self.memory_manager.search(sub_arg, project_path=self.approved_directory)
+            if not results:
+                text = f"🔍 未找到与「{sub_arg}」相关的记忆"
+            else:
+                lines = [f"🔍 找到 {len(results)} 条相关记忆\n"]
+                for m in results:
+                    lines.append(f"🔧 **{m.title}**\n   {m.solution[:100]}")
+                text = "\n".join(lines)
+            return HandlerResult(success=True, response_text=text[:2000])
+
+        elif sub_cmd == "delete":
+            if not sub_arg:
+                return HandlerResult(success=True,
+                                     response_text="用法: /memory delete <id>")
+            ok = self.memory_manager.delete(sub_arg)
+            if ok:
+                return HandlerResult(success=True, response_text="🗑️ 记忆已删除")
+            return HandlerResult(success=True, response_text="未找到该记忆")
+
+        elif sub_cmd == "clear":
+            memories = self.memory_manager.get_by_project(self.approved_directory)
+            count = sum(1 for m in memories if self.memory_manager.delete(m.id))
+            return HandlerResult(success=True,
+                                 response_text=f"🧹 已清除 {count} 条记忆")
+
+        else:
+            return HandlerResult(success=True,
+                                 response_text=f"未知子命令: {sub_cmd}\n"
+                                 "用法: /memory [list|add|search|delete|clear]")
+
     async def _handle_switch(self, message: IncomingMessage) -> HandlerResult:
         """Handle /switch <target-path> command."""
         from cc_feishu_bridge.switcher import run_switch, switch_to, SwitchError as SwitchErr
@@ -360,6 +436,7 @@ class MessageHandler:
         message: IncomingMessage,
         session,
         sdk_session_id: str | None,
+        memory_context: str | None = None,
     ) -> None:
         """Run Claude query in background, send results to Feishu on completion."""
         reaction_id = None
@@ -497,6 +574,7 @@ class MessageHandler:
                 session_id=sdk_session_id,
                 cwd=session.project_path if session else self.approved_directory,
                 on_stream=stream_callback,
+                memory_context=memory_context,
             )
 
             # Flush any remaining buffered text
