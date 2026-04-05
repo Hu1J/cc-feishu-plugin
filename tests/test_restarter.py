@@ -481,6 +481,20 @@ class TestDoUpdate:
                     assert steps[3].step == 4
                     assert steps[3].label == "准备重启"
 
+    def test_pip_install_failure_raises_restart_error(self):
+        """_do_update raises RestartError when pip install returns non-zero."""
+        with patch("cc_feishu_bridge.restarter.check_version") as mock_cv:
+            mock_cv.return_value = ("0.2.5", "0.2.6")  # update available
+            with patch("subprocess.run") as mock_pip:
+                mock_pip.return_value = MagicMock(
+                    returncode=1,
+                    stdout="",
+                    stderr="Could not find a version that satisfies the requirement",
+                )
+                mock_lock = MagicMock()
+                with pytest.raises(RestartError, match="pip install 失败"):
+                    list(_do_update(file_lock=mock_lock))
+
 
 class TestRunUpdateCliAlreadyLatest:
     """Tests for run_update_cli early return when already latest."""

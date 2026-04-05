@@ -367,10 +367,12 @@ def _do_update(file_lock=None):
     yield UpdateStep(step=2, total=7, label=_UPDATE_CLI_STEP_LABELS[1], status="done",
                      detail=f"{current_ver} → {latest_ver}")
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["pip", "install", "-U", "cc-feishu-bridge", "-i", "https://pypi.org/simple/"],
             capture_output=True, text=True, timeout=120,
         )
+        if result.returncode != 0:
+            raise RestartError(f"pip install 失败: {result.stderr or result.stdout}")
     except subprocess.TimeoutExpired:
         raise RestartError("下载超时")
     except Exception as e:
