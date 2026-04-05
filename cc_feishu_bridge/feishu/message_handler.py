@@ -672,7 +672,8 @@ class MessageHandler:
             "📝 **变更文件**",
         ]
 
-        if status_output:
+        has_changes = bool(status_output)
+        if has_changes:
             for line in status_output.splitlines():
                 idx_char = line[0]
                 wt_char = line[1]
@@ -684,24 +685,24 @@ class MessageHandler:
                     char = idx_char
                 icon = status_icon.get(char, "•")
                 card_lines.append(f"{icon}  {line[3:]}")
-
-            card_lines.extend([
-                "",
-                "📋 **最近提交**",
-                "",
-                "| 时间 | Hash | 描述 |",
-                "|------|------|------|",
-            ])
-            for log_line in log_lines:
-                # %cI: "2026-04-04T12:00:00+08:00 hash desc"
-                parts = log_line.split(" ", 2)
-                if len(parts) >= 3:
-                    dt_clean = parts[0].replace("T", " ")[:16]
-                    h = parts[1]
-                    msg = parts[2]
-                    card_lines.append(f"| {dt_clean} | `{h}` | {msg} |")
         else:
-            card_lines.append("✅ **工作区干净，无待提交变更**")
+            card_lines.append("✅ 工作区干净，无待提交变更")
+
+        # 最近提交始终显示
+        card_lines.extend([
+            "",
+            "📋 **最近提交**",
+            "",
+            "| 时间 | Hash | 描述 |",
+            "|------|------|------|",
+        ])
+        for log_line in log_lines:
+            parts = log_line.split(" ", 2)
+            if len(parts) >= 3:
+                dt_clean = parts[0].replace("T", " ")[:16]
+                h = parts[1]
+                msg = parts[2]
+                card_lines.append(f"| {dt_clean} | `{h}` | {msg} |")
 
         card_body = "\n".join(card_lines)
         try:
