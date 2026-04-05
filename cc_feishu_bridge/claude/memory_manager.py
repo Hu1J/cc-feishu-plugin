@@ -182,7 +182,7 @@ class MemoryManager:
                     WHERE memories_fts MATCH ?
                       AND m.status = 'active'
                       AND m.type = 'project_context'
-                      AND (m.project_path IS NULL OR m.project_path = '' OR m.project_path = ?)
+                      AND m.project_path = ?
                     ORDER BY m.use_count DESC, rank
                     LIMIT ?
                 """, (query, project_path, limit)).fetchall()
@@ -232,16 +232,28 @@ class MemoryManager:
         """
         if type_filter is None:
             type_filter = ["project_context", "user_preference"]
-        placeholders = ",".join("?" * len(type_filter))
+
+        user_pref_globally = "user_preference" in type_filter
+        proj_ctx_locally   = "project_context" in type_filter
+
+        conditions = []
+        params: list = []
+
+        if user_pref_globally:
+            conditions.append("(type = 'user_preference' AND project_path IS NULL)")
+        if proj_ctx_locally:
+            conditions.append("(type = 'project_context' AND (project_path = ? OR project_path IS NULL))")
+            params.append(project_path)
+
+        where_clause = " OR ".join(conditions) if conditions else "0"
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(f"""
                 SELECT * FROM memories
                 WHERE status = 'active'
-                  AND type IN ({placeholders})
-                  AND (project_path IS NULL OR project_path = ?)
+                  AND ({where_clause})
                 ORDER BY use_count DESC, created_at DESC
-            """, (*type_filter, project_path)).fetchall()
+            """, params).fetchall()
         return [MemoryEntry(**dict(row)) for row in rows]
 
     def delete(self, memory_id: str) -> bool:

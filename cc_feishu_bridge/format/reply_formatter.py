@@ -243,15 +243,26 @@ class ReplyFormatter:
         return f"{header}\n```bash\n{command}\n```"
 
     def _format_read_tool(self, tool_input: str) -> str:
-        """Format Read tool call with backtick-wrapped file path."""
+        """Format Read tool call with backtick-wrapped file path and optional offset/limit."""
         try:
             data = json.loads(tool_input)
             file_path = data.get("file_path", tool_input)
         except json.JSONDecodeError:
             file_path = tool_input
+            data = {}
 
         icon = self.tool_icons.get("Read", "📖")
-        return f"{icon} **Read**\n`{file_path}`"
+        extras = []
+        if data.get("offset") is not None:
+            extras.append(f"offset {data['offset']}")
+        if data.get("limit") is not None:
+            extras.append(f"limit {data['limit']}")
+
+        if extras:
+            title = f"**Read** `{file_path}` — " + " — ".join(extras)
+        else:
+            title = f"**Read** `{file_path}`"
+        return f"{icon} {title}"
 
     def _format_todowrite_tool(self, tool_input: str) -> str:
         """Format TodoWrite tool call as a markdown table."""

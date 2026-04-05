@@ -4,10 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.3.4] - 2026-04-05
+## [0.3.5] - 2026-04-05
+
+### Fixed
+- **记忆查询作用域隔离**：修复 `search()` 和 `get_by_project()` 中 project_context 查询的 `project_path IS NULL` 误匹配问题，确保项目背景严格按路径隔离
+
+### Changed
+- **Read 工具展示优化**：有 offset/limit 参数时，标题行附加 `— offset N — limit M`，便于快速了解读取范围
 
 ### Changed
 - **记忆系统改由 CC 自驱**：移除简陋的关键词规则引擎 `_try_extract_memory`，改为在每次对话时向 CC 注入固定提示词，引导 CC 遇到报错时主动搜记忆、解决后主动问用户是否记住、用户说"记住"时直接写入
+
+## [0.3.4] - 2026-04-05
 
 ## [0.3.3] - 2026-04-05
 

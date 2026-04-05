@@ -74,13 +74,20 @@ def test_format_read_tool(formatter):
     import json
     tool_input = json.dumps({"file_path": "src/main.py"})
     result = formatter.format_tool_call("Read", tool_input)
-    assert result == "📖 **Read**\n`src/main.py`"
+    assert result == "📖 **Read** `src/main.py`"
+
+
+def test_format_read_tool_with_offset_and_limit(formatter):
+    import json
+    tool_input = json.dumps({"file_path": "src/main.py", "offset": 40, "limit": 50})
+    result = formatter.format_tool_call("Read", tool_input)
+    assert result == "📖 **Read** `src/main.py` — offset 40 — limit 50"
 
 
 def test_format_read_tool_string_input(formatter):
     # 非 JSON 字符串输入（fallback）
     result = formatter.format_tool_call("Read", "src/main.py")
-    assert result == "📖 **Read**\n`src/main.py`"
+    assert result == "📖 **Read** `src/main.py`"
 
 
 def test_format_todowrite_with_items(formatter):
