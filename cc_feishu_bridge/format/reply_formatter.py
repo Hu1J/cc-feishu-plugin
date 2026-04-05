@@ -154,6 +154,10 @@ class ReplyFormatter:
             "WebSearch": "🌐",
             "Task": "📋",
             "MemorySearch": "🧠",
+            "MemoryList": "🧠",
+            "MemoryAdd": "🧠",
+            "MemoryDelete": "🧠",
+            "MemoryClear": "🧠",
         }
 
     def format_text(self, text: str) -> str:

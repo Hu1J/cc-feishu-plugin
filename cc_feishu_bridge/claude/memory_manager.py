@@ -40,6 +40,17 @@ class MemoryEntry:
         if self.updated_at is None:
             self.updated_at = now
 
+    def to_dict(self) -> dict:
+        """Return a plain dict suitable for JSON serialization."""
+        return asdict(self)
+
+
+@dataclass
+class MemorySearchResult:
+    """A memory entry with its FTS search rank (lower = better match)."""
+    entry: MemoryEntry
+    rank: float  # FTS5 bm25 rank (lower = more relevant)
+
 
 class MemoryManager:
     """SQLite+FTS5-backed memory manager."""
@@ -117,11 +128,13 @@ class MemoryManager:
         query: str,
         project_path: Optional[str] = None,
         limit: int = 5,
-    ) -> list[MemoryEntry]:
+    ) -> list[MemorySearchResult]:
         """
         Full-text search via FTS5:
         - problem_solution + user_preference: always searched globally
         - project_context: scoped to current project
+
+        Returns results with FTS rank so callers can assess match quality.
         """
         if not query.strip():
             return []
@@ -170,21 +183,35 @@ class MemoryManager:
             rows = ps_rows + up_rows + pc_rows
             if not rows:
                 return []
-            ids = [r["id"] for r in rows]
-            # Build CASE expression to preserve original bm25 ranking order after UPDATE
-            case_expr = "CASE id " + "".join(f"WHEN '{rid}' THEN {i} " for i, rid in enumerate(ids)) + "END"
+
+            # Build rank map {id: rank} before the use_count update wipes it
+            rank_map = {dict(r)["id"]: dict(r)["rank"] for r in rows}
+            ids = list(rank_map.keys())
+
+            # Update use_count for all matched entries
             conn.execute(
                 "UPDATE memories SET use_count = use_count + 1, last_used_at = ? "
                 "WHERE id IN (" + ",".join("?" * len(ids)) + ")",
                 (datetime.utcnow().isoformat(), *ids)
             )
-            # Re-fetch with ORDER BY CASE to preserve original ranking
-            rows = conn.execute(
+
+        # Re-fetch entries and pair with preserved ranks
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            # Build CASE expression to preserve original bm25 ranking order
+            case_expr = "CASE id " + "".join(f"WHEN '{rid}' THEN {i} " for i, rid in enumerate(ids)) + "END"
+            entries = conn.execute(
                 f"SELECT * FROM memories WHERE id IN ({','.join('?' * len(ids))}) "
                 f"ORDER BY {case_expr}",
                 ids
             ).fetchall()
-        return [MemoryEntry(**{k: v for k, v in dict(row).items() if k != "rank"}) for row in rows]
+
+        results = []
+        for row in entries:
+            entry = MemoryEntry(**dict(row))
+            rank = rank_map.get(entry.id, 0.0)
+            results.append(MemorySearchResult(entry=entry, rank=rank))
+        return results
 
     def get_by_project(
         self,

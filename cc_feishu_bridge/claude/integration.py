@@ -64,7 +64,7 @@ class ClaudeIntegration:
         """
         try:
             from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
-            from cc_feishu_bridge.claude.memory_tools import MEMORY_SEARCH_TOOL
+            from cc_feishu_bridge.claude.memory_tools import get_memory_mcp_server
 
             # Build effective prompt with memory context
             effective_prompt = prompt
@@ -78,7 +78,7 @@ class ClaudeIntegration:
                 include_partial_messages=True,
                 permission_mode="bypassPermissions",
                 continue_conversation=bool(session_id),
-                tools=[MEMORY_SEARCH_TOOL],
+                mcp_servers={"memory": get_memory_mcp_server()},
             )
 
             client = ClaudeSDKClient(options=options)

@@ -140,7 +140,6 @@ def ensure_skill_installed() -> None:
 
     skills = [
         ("cc_feishu_bridge.skill_md", "SKILL_MD", "SKILL_NAME", "SKILL_VERSION"),
-        ("cc_feishu_bridge.memory_skill_md", "SKILL_MD", "SKILL_NAME", "SKILL_VERSION"),
     ]
 
     for module_path, md_attr, name_attr, ver_attr in skills:
@@ -483,7 +482,8 @@ def _run_memory_command(args) -> None:
             return
 
         # Terminal output
-        for m in results:
+        for r in results:
+            m = r.entry
             print(f"\n{_type_icon(m.type)} **{m.title}**  (id={m.id})")
             if m.problem:
                 print(f"  问题: {m.problem}")
@@ -497,7 +497,8 @@ def _run_memory_command(args) -> None:
 
         # Push to Feishu
         lines = [f"🔍 **记忆搜索: {query}**", "", f"找到 {len(results)} 条相关记忆", ""]
-        for m in results:
+        for r in results:
+            m = r.entry
             lines.append(f"{_type_icon(m.type)} **{m.title}**")
             if m.problem:
                 lines.append(f"  问题: {m.problem}")

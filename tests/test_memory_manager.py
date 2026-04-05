@@ -26,7 +26,7 @@ def test_add_and_search(mgr):
     mgr.add(entry)
     results = mgr.search("npm install")
     assert len(results) >= 1
-    assert "冲突" in results[0].solution or "npm" in (results[0].tags or "")
+    assert "冲突" in results[0].entry.solution or "npm" in (results[0].entry.tags or "")
 
 
 def test_project_scope(mgr):
@@ -48,7 +48,7 @@ def test_use_count_bumped_on_search(mgr):
     mgr.add(entry)
     mgr.search("API")
     found = mgr.search("API")
-    assert found[0].use_count == 2
+    assert found[0].entry.use_count == 2
 
 
 def test_delete(mgr):
@@ -56,7 +56,7 @@ def test_delete(mgr):
     mgr.add(entry)
     results = mgr.search("delete")
     assert len(results) >= 1
-    mgr.delete(results[0].id)
+    mgr.delete(results[0].entry.id)
     assert len(mgr.search("delete")) == 0
 
 

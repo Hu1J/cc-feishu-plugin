@@ -374,8 +374,8 @@ class MessageHandler:
                 text = f"🔍 未找到与「{sub_arg}」相关的记忆"
             else:
                 lines = [f"🔍 找到 {len(results)} 条相关记忆\n"]
-                for m in results:
-                    lines.append(f"🧠 **{m.title}**\n   {m.solution[:100]}")
+                for r in results:
+                    lines.append(f"🧠 **{r.entry.title}**\n   {r.entry.solution[:100]}")
                 text = "\n".join(lines)
             return HandlerResult(success=True, response_text=text[:2000])
 
