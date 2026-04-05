@@ -293,27 +293,23 @@ def _start_bridge(project_path: str, timeout: float = 8.0) -> int:
 # ---------------------------------------------------------------------------
 
 def check_version() -> tuple[str, str]:
-    """Check current vs latest version of cc-feishu-bridge.
+    """Check current vs latest version of cc-feishu-bridge via PyPI JSON API.
 
     Returns (current_version, latest_version).
     Raises RestartError on any failure.
     """
-    import re
+    import httpx
     from cc_feishu_bridge import __version__ as current_ver
     try:
-        result = subprocess.run(
-            ["pip", "index", "versions", "cc-feishu-bridge"],
-            capture_output=True, text=True, timeout=15,
+        response = httpx.get(
+            "https://pypi.org/pypi/cc-feishu-bridge/json",
+            timeout=15,
         )
-        if result.returncode != 0:
-            raise RestartError("pip index versions failed")
-        m = re.search(r"cc-feishu-bridge\s+\((.+?)\)", result.stdout)
-        if not m:
-            raise RestartError("无法解析 pip index versions 输出")
-        latest_ver = m.group(1)
+        response.raise_for_status()
+        latest_ver = response.json()["info"]["version"]
         return (current_ver, latest_ver)
-    except subprocess.TimeoutExpired:
-        raise RestartError("检查版本超时")
+    except httpx.HTTPStatusError as e:
+        raise RestartError(f"PyPI 请求失败: {e.response.status_code}")
     except Exception as e:
         raise RestartError(f"检查版本失败: {e}")
 
@@ -351,14 +347,19 @@ def _do_update(file_lock=None):
     import packaging.version
 
     # Step 1: 检查更新
-    yield UpdateStep(step=1, total=7, label=_UPDATE_CLI_STEP_LABELS[0], status="done")
     current_ver, latest_ver = check_version()
+    yield UpdateStep(
+        step=1, total=7,
+        label=_UPDATE_CLI_STEP_LABELS[0],
+        status="done",
+        detail=f"{current_ver} → {latest_ver}",
+    )
     if packaging.version.parse(latest_ver) <= packaging.version.parse(current_ver):
         yield UpdateStep(
             step=2, total=7,
             label=_UPDATE_CLI_STEP_LABELS[1],
             status="skip",
-            detail=f"当前版本 {current_ver} 已是最新",
+            detail=current_ver,
             success=True,
         )
         return
@@ -412,7 +413,7 @@ async def run_update(file_lock, feishu: "FeishuClient",
             card = (
                 f"## ✅ 已是最新版本\n\n"
                 f"**当前版本**: `{step_obj.detail}`\n\n"
-                f"无需更新，继续使用吧。"
+                f"无需更新，继续使用吧 🎉"
             )
             await feishu.send_interactive_reply(chat_id, card, reply_to_message_id)
             return False
@@ -431,9 +432,14 @@ async def run_update(file_lock, feishu: "FeishuClient",
             )
             await feishu.send_interactive_reply(chat_id, final_card, reply_to_message_id)
         else:
+            detail_line = (
+                f"**版本**: `{step_obj.detail}`\n\n"
+                if step_obj.detail else ""
+            )
             progress_card = (
                 f"## 🔄 正在更新\n\n"
                 f"**当前目录**: `{current_path}`\n\n"
+                f"{detail_line}"
                 f"{bar} `{step_obj.step}/{total}` {label}\n\n"
                 f"⏳ 正在更新，请稍候..."
             )
@@ -473,10 +479,15 @@ def run_update_cli(file_lock, feishu=None, chat_id: str | None = None):
             # Already latest — send initial card then "already latest" card
             initial = f"## 🔄 正在更新\n\n⏳ 检查更新，请稍候..."
             await _send(initial)
+            # Find step 1 detail for version display
+            step1_detail = next(
+                (s.detail for s in steps if s.step == 1 and s.detail),
+                steps[-1].detail
+            )
             card = (
                 f"## ✅ 已是最新版本\n\n"
                 f"**当前版本**: `{steps[-1].detail}`\n\n"
-                f"无需更新，继续使用吧。"
+                f"无需更新，继续使用吧 🎉"
             )
             await _send(card)
             return
@@ -500,8 +511,13 @@ def run_update_cli(file_lock, feishu=None, chat_id: str | None = None):
                 )
                 await _send(card)
             else:
+                detail_line = (
+                    f"**版本**: `{step_obj.detail}`\n\n"
+                    if step_obj.detail else ""
+                )
                 card = (
                     f"## 🔄 正在更新\n\n"
+                    f"{detail_line}"
                     f"{bar} `{step_obj.step}/7` {label}\n\n"
                     f"⏳ 正在更新，请稍候..."
                 )

@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+## [0.3.8] - 2026-04-06
+
+### Fixed
+- **check_version 兼容性**：改用 PyPI JSON API 检查版本，不再依赖 `pip index`（experimental 命令，部分 pip 版本不支持）
+- **更新展示优化**：`/update` 检查时展示当前版本和最新版本，已是最新时明确告知
+
 ## [0.3.7] - 2026-04-05
 
 ### Changed
