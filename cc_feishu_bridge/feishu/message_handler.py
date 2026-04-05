@@ -336,31 +336,18 @@ class MessageHandler:
         sub_cmd = parts[1].lower() if len(parts) > 1 else ""
         sub_arg = parts[2].strip() if len(parts) > 2 else ""
 
-        if sub_cmd == "":
-            # List all memories for current project
-            memories = self.memory_manager.get_by_project(self.approved_directory)
-            if not memories:
-                text = "📭 暂无记忆记录\n\n用 /memory add <内容> 添加第一条记忆"
+        if sub_cmd == "" or sub_cmd == "list":
+            # List all user preferences (global)
+            prefs = self.memory_manager.get_all_preferences()
+            if not prefs:
+                text = "📭 暂无用户偏好记录\n\n用 /memory add <内容> 添加偏好"
             else:
-                lines = [f"📒 当前项目记忆（共 {len(memories)} 条）\n"]
-                for m in memories:
-                    icon = {"problem_solution": "🧠", "project_context": "📁",
-                            "user_preference": "👤", "reference": "📖"}.get(m.type, "💡")
-                    lines.append(f"{icon} **{m.title}**\n   {m.solution[:80]}")
-                text = "\n".join(lines)
-            return HandlerResult(success=True, response_text=text[:2000])
-
-        elif sub_cmd == "list":
-            # List all memories for current project
-            memories = self.memory_manager.get_by_project(self.approved_directory)
-            if not memories:
-                text = "📭 暂无记忆记录\n\n用 /memory add <内容> 添加第一条记忆"
-            else:
-                lines = [f"📒 当前项目记忆（共 {len(memories)} 条）\n"]
-                for m in memories:
-                    icon = {"problem_solution": "🧠", "project_context": "📁",
-                            "user_preference": "👤", "reference": "📖"}.get(m.type, "💡")
-                    lines.append(f"{icon} **{m.title}**\n   {m.solution[:80]}")
+                lines = [f"👤 用户偏好（共 {len(prefs)} 条）\n"]
+                for p in prefs:
+                    lines.append(f"**{p.title}**")
+                    lines.append(f"  {p.content[:80]}")
+                    lines.append(f"  关键词: {p.keywords}")
+                    lines.append("")
                 text = "\n".join(lines)
             return HandlerResult(success=True, response_text=text[:2000])
 
@@ -368,28 +355,31 @@ class MessageHandler:
             if not sub_arg:
                 return HandlerResult(success=True,
                                      response_text="用法: /memory add <记忆内容>")
-            from cc_feishu_bridge.claude.memory_manager import MemoryEntry
-            entry = MemoryEntry(
-                type="user_preference",
+            pref = self.memory_manager.add_preference(
                 title=sub_arg[:60],
-                solution=sub_arg,
-                project_path=self.approved_directory,
+                content=sub_arg,
+                keywords=sub_arg[:30].replace(" ", ","),
             )
-            self.memory_manager.add(entry)
             return HandlerResult(success=True,
-                                 response_text=f"✅ 记忆已保存\n\n📌 {sub_arg[:100]}")
+                                 response_text=f"✅ 用户偏好已保存（ID: {pref.id}）\n\n📌 {sub_arg[:100]}")
 
         elif sub_cmd == "search":
             if not sub_arg:
                 return HandlerResult(success=True,
                                      response_text="用法: /memory search <关键词>")
-            results = self.memory_manager.search(sub_arg, project_path=self.approved_directory)
+            results = self.memory_manager.search_project_memories(
+                sub_arg, project_path=self.approved_directory
+            )
             if not results:
-                text = f"🔍 未找到与「{sub_arg}」相关的记忆"
+                text = f"🔍 未找到与「{sub_arg}」相关的项目记忆"
             else:
-                lines = [f"🔍 找到 {len(results)} 条相关记忆\n"]
+                lines = [f"🔍 项目记忆搜索结果（共 {len(results)} 条）\n"]
                 for r in results:
-                    lines.append(f"🧠 **{r.entry.title}**\n   {r.entry.solution[:100]}")
+                    m = r.memory
+                    lines.append(f"📁 **{m.title}**")
+                    lines.append(f"  {m.content[:100]}")
+                    lines.append(f"  关键词: {m.keywords}")
+                    lines.append("")
                 text = "\n".join(lines)
             return HandlerResult(success=True, response_text=text[:2000])
 
@@ -397,16 +387,15 @@ class MessageHandler:
             if not sub_arg:
                 return HandlerResult(success=True,
                                      response_text="用法: /memory delete <id>")
-            ok = self.memory_manager.delete(sub_arg)
+            ok = self.memory_manager.delete_project_memory(sub_arg)
             if ok:
-                return HandlerResult(success=True, response_text="🗑️ 记忆已删除")
+                return HandlerResult(success=True, response_text="🗑️ 项目记忆已删除")
             return HandlerResult(success=True, response_text="未找到该记忆")
 
         elif sub_cmd == "clear":
-            memories = self.memory_manager.get_by_project(self.approved_directory)
-            count = sum(1 for m in memories if self.memory_manager.delete(m.id))
+            count = self.memory_manager.clear_project_memories(self.approved_directory)
             return HandlerResult(success=True,
-                                 response_text=f"🧹 已清除 {count} 条记忆")
+                                 response_text=f"🧹 已清除 {count} 条项目记忆")
 
         else:
             return HandlerResult(success=True,
