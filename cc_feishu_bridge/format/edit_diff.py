@@ -87,10 +87,6 @@ def _truncate_diff(diff: list[DiffLine]) -> list[DiffLine]:
     """截断过长的 diff，保留首尾上下文。"""
     if len(diff) <= MAX_DIFF_LINES:
         return diff
-    # 找第一个和最后一个变化行（不是 context 的行）
-    first_change = next((i for i, d in enumerate(diff) if d.type != "context"), 0)
-    last_change = next((len(diff) - 1 - i for i, d in enumerate(reversed(diff)) if d.type != "context"), len(diff) - 1)
-
     # 保留前 CONTEXT_LINES 行上下文
     keep_head = diff[:CONTEXT_LINES]
     keep_tail = diff[-CONTEXT_LINES:] if len(diff) >= CONTEXT_LINES else diff
@@ -99,16 +95,22 @@ def _truncate_diff(diff: list[DiffLine]) -> list[DiffLine]:
 
 
 def _format_diff_lark_md(diff_lines: list[DiffLine]) -> str:
-    """将 diff_lines 格式化为 lark_md 文本，每行带行号和颜色标签。"""
+    """将 diff_lines 格式化为 lark_md 文本，每行带行号（行号右对齐）和颜色标签。"""
+    if not diff_lines:
+        return ""
+    # 计算行号宽度，右对齐，保证 │ 符号上下对齐
+    width = len(str(len(diff_lines)))
+
     parts = []
     for i, d in enumerate(diff_lines, 1):
         line = f"{d.prefix()}{d.content}"
+        line_no_str = str(i).rjust(width)
         if d.type == "deletion":
-            colored = f"<font color='red'>{i} │ {line}</font>"
+            colored = f"<font color='red'>{line_no_str} │ {line}</font>"
         elif d.type == "insertion":
-            colored = f"<font color='green'>{i} │ {line}</font>"
+            colored = f"<font color='green'>{line_no_str} │ {line}</font>"
         else:
-            colored = f"{i} │ {line}"
+            colored = f"{line_no_str} │ {line}"
         parts.append(colored)
     return "\n".join(parts)
 
