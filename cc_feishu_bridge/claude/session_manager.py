@@ -30,6 +30,7 @@ class Session:
 
 class SessionManager:
     def __init__(self, db_path: str):
+        self._conv_history: dict[str, list[str]] = {}
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -325,6 +326,11 @@ class SessionManager:
                 (message_id, session_id, chat_id, user_open_id, message_type,
                  raw_content, content, now, direction),
             )
+        # Track conversation for auto memory extraction
+        if direction == "incoming":
+            history = self._conv_history.setdefault(session_id, [])
+            history.append(content or raw_content)
+            self._conv_history[session_id] = history[-20:]  # keep last 20 messages
 
     def _init_memories_db(self):
         """Initialize memories DB (separate file from sessions)."""

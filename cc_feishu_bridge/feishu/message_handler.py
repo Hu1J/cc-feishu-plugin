@@ -593,6 +593,14 @@ class MessageHandler:
                 if new_session_id:
                     self.sessions.update_sdk_session_id(session.session_id, new_session_id)
 
+                # Auto-extract memory if conversation contains error-fix pattern
+                try:
+                    history = self.sessions._conv_history.get(session.session_id, [])
+                    if history and any(kw in " ".join(history) for kw in ["错误", "报错", "failed", "error", "exception", "已修复", "已解决", "fixed", "resolved"]):
+                        self._try_extract_memory(history, self.approved_directory, message.user_open_id)
+                except Exception:
+                    logger.exception("[memory] auto-extraction failed")
+
             # Send final text response only if no text was streamed.
             # If text was streamed in real-time, it is already visible in the chat.
             if not accumulator.sent_something:
@@ -704,6 +712,40 @@ class MessageHandler:
             await self._safe_send(message.chat_id, message.message_id, card_body)
 
         return HandlerResult(success=True)
+
+    def _try_extract_memory(
+        self,
+        conversation: list[str],
+        project_path: str,
+        user_id: str,
+    ) -> None:
+        """
+        Lightweight rule-based memory extraction.
+        If conversation mentions an error keyword AND a fix keyword, save it.
+        """
+        text = " ".join(conversation)
+        # Pattern: error keyword followed by solution keyword
+        has_error = any(kw in text for kw in ["错误", "报错", "failed", "error", "exception"])
+        has_fix = any(kw in text for kw in ["已修复", "已解决", "fixed", "resolved", "success"])
+        if has_error and has_fix:
+            # Extract first error-like line as problem
+            error_lines = [l for l in conversation if any(kw in l for kw in ["错误", "报错", "failed", "error", "exception"])]
+            # Extract last non-error response as solution
+            solution_lines = [l for l in conversation if l.strip() and not any(kw in l for kw in ["错误", "报错", "failed", "error", "exception"])]
+            problem = error_lines[0][:200] if error_lines else None
+            solution = solution_lines[-1][:200] if solution_lines else None
+            if problem and solution and problem != solution:
+                from cc_feishu_bridge.claude.memory_manager import MemoryEntry
+                entry = MemoryEntry(
+                    type="problem_solution",
+                    title=problem[:60],
+                    problem=problem,
+                    solution=solution,
+                    project_path=project_path,
+                    user_id=user_id,
+                )
+                self.memory_manager.add(entry)
+                logger.info(f"[memory] auto-extracted: {problem[:50]}")
 
     async def _safe_send(self, chat_id: str, reply_to_message_id: str, text: str, log_reply: bool = True):
         """Send a markdown message as a threaded Feishu post/card, ignoring errors.
