@@ -98,13 +98,13 @@ def _format_diff_lark_md(diff_lines: list[DiffLine]) -> str:
     """将 diff_lines 格式化为 lark_md 文本，每行带行号（行号右对齐）和颜色标签。"""
     if not diff_lines:
         return ""
-    # 计算行号宽度，右对齐，保证 │ 符号上下对齐
-    width = len(str(len(diff_lines)))
+    # 计算行号位数，零填充对齐（避免等宽字体下空格对齐不可靠）
+    digits = len(str(len(diff_lines)))
 
     parts = []
     for i, d in enumerate(diff_lines, 1):
         line = f"{d.prefix()}{d.content}"
-        line_no_str = str(i).rjust(width)
+        line_no_str = str(i).zfill(digits)
         if d.type == "deletion":
             colored = f"<font color='red'>{line_no_str} │ {line}</font>"
         elif d.type == "insertion":
