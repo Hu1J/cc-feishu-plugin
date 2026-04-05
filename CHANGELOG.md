@@ -7,11 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.3.0] - 2026-04-05
 
 ### Added
-- **记忆增强系统**：本地 SQLite+FTS5 存储，支持 CC 主动检索和自动提取，问题解决后自动记忆
-- **MemorySearch 工具**：CC 遇到报错时自动查询本地记忆库，系统提示词引导优先使用
+- **记忆增强系统**：本地 SQLite+FTS5 存储，记忆库位于 `~/.cc-feishu-bridge/memories.db`，所有项目全局共享
+- **cc-memory-search skill**：CC 遇到报错时自动使用此 skill 搜索本地记忆库获取解决方案；skill 在 bridge 启动时自动安装到 `~/.claude/skills/`
 - **`/memory` 指令**：飞书端管理记忆，支持 list / add / search / delete / clear 子命令
-- **`/memory search` 关键词检索**：FTS5 全文搜索，命中次数多的记忆优先返回
-- **项目范围记忆**：记忆可关联项目路径，同项目内自动注入上下文
+- **FTS5 全文搜索**：关键词检索，命中次数（use_count）越高的记忆越靠前
+- **记忆类型与作用域**：
+  - `problem_solution`（问题解决）— 全局共享，CC 通过 skill 按需搜索
+  - `user_preference`（用户偏好）— 全局共享，每次对话自动注入 prompt
+  - `project_context`（项目背景）— 项目隔离，每次对话自动注入 prompt
+- **自动提取**：会话成功解决报错后，自动提取对话中的错误+解决方案写入记忆库
+
+### Fixed
+- **`/git` 工作区干净时不显示提交历史**：修复因条件判断错误导致无变更时 commit 历史被隐藏的问题
 
 ## [0.2.9] - 2026-04-05
 

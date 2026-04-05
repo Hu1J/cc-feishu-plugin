@@ -7,11 +7,53 @@ Claude Code 飞书桥接插件 — 在飞书中与本地 Claude Code 对话。
 - `/new` — 创建新会话
 - `/status` — 查看当前会话状态（会话 ID、消息数、累计费用、工作目录）
 - `/stop` — 打断 Claude 当前正在执行的查询
-- `/git` — 显示当前项目 git status 和最近 5 次提交
+- `/git` — 显示当前项目 git status 和最近 5 次提交（工作区干净时也显示提交历史）
 - `/switch <目录>` — 切换到另一个项目的 bridge 实例
 - `/restart` — 重启当前 bridge 实例
 - `/update` — 检查 PyPI 最新版本，如有更新则自动下载并重启
+- `/memory` — 管理本地记忆库（list / add / search / delete / clear）
 - `/help` — 查看所有可用命令
+
+## 记忆系统
+
+cc-feishu-bridge 内置本地记忆系统，让 Claude Code 记住曾经踩过的坑，不再重复犯错。
+
+### 记忆类型
+
+| 类型 | 说明 | 作用域 | 获取方式 |
+|------|------|--------|----------|
+| `problem_solution` | 踩过的坑 + 解决方案 | **全局共享** | CC 遇报错时自动搜索 skill |
+| `user_preference` | 用户偏好（如"用中文注释"） | **全局共享** | 每次对话自动注入 prompt |
+| `project_context` | 项目背景知识 | 项目隔离 | 每次对话自动注入 prompt |
+
+### 工作原理
+
+1. **CC 遇到报错** → 使用 `cc-memory-search` skill 搜索本地记忆库
+2. **命中已知问题** → 直接给出解决方案，不再重复调查
+3. **成功解决问题** → 自动提取错误+解决方案写入记忆库，下次直接命中
+
+### 手动管理
+
+```bash
+# 搜索记忆
+cc-feishu-bridge memory search npm install failed
+
+# 查看所有记忆
+cc-feishu-bridge memory list
+
+# 手动添加记忆
+cc-feishu-bridge memory add "用 pnpm install，不要用 npm" --type user_preference
+
+# 删除记忆
+cc-feishu-bridge memory delete <id>
+```
+
+飞书端也支持：`/memory list`、`/memory add xxx`、`/memory search xxx`、`/memory delete <id>`
+
+### 数据存储
+
+- 记忆库位置：`~/.cc-feishu-bridge/memories.db`
+- 搜索命中次数越高的记忆排名越靠前
 
 ## 核心功能
 
