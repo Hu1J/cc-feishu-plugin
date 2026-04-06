@@ -40,8 +40,9 @@ MEMORY_SYSTEM_GUIDE = """
 
 @dataclass
 class UserPreference:
-    """用户偏好条目（全局）"""
+    """用户偏好条目（按飞书用户隔离）"""
     id: str
+    user_open_id: str
     title: str
     content: str
     keywords: str  # 逗号分隔
@@ -81,47 +82,49 @@ class MemoryManager:
         self._init_db()
 
     def _init_db(self):
-        """创建/升级数据库：删除旧表，建新表"""
+        """创建/升级数据库：新建表或迁移已有表"""
         with sqlite3.connect(self.db_path) as conn:
-            # 删除旧表（首次启动迁移）
-            conn.execute("DROP TABLE IF EXISTS memories")
-            conn.execute("DROP TABLE IF EXISTS memories_fts")
-            conn.execute("DROP INDEX IF EXISTS idx_memories_project_path")
-            conn.execute("DROP INDEX IF EXISTS idx_memories_type")
+            # ── user_preferences ──────────────────────────────────────────────────
+            pref_cols = [r[1] for r in conn.execute("PRAGMA table_info(user_preferences)")]
+            if not pref_cols:
+                # 新表：包含 user_open_id
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS user_preferences (
+                        id           TEXT PRIMARY KEY,
+                        user_open_id TEXT NOT NULL,
+                        title        TEXT NOT NULL,
+                        content      TEXT NOT NULL,
+                        keywords     TEXT NOT NULL,
+                        created_at   TEXT NOT NULL,
+                        updated_at   TEXT NOT NULL
+                    )
+                """)
+            elif "user_open_id" not in pref_cols:
+                # 迁移：旧表没有 user_open_id，加列
+                conn.execute("ALTER TABLE user_preferences ADD COLUMN user_open_id TEXT NOT NULL DEFAULT ''")
+                logger.info("migrated user_preferences: added user_open_id column")
 
-            # 建 user_preferences 表
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS user_preferences (
-                    id          TEXT PRIMARY KEY,
-                    title       TEXT NOT NULL,
-                    content     TEXT NOT NULL,
-                    keywords    TEXT NOT NULL,
-                    created_at  TEXT NOT NULL,
-                    updated_at  TEXT NOT NULL
-                )
-            """)
-
-            # 建 user_preferences FTS5
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS user_preferences_fts USING fts5(
                     id UNINDEXED, title, content, keywords, tokenize='unicode61'
                 )
             """)
 
-            # 建 project_memories 表
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS project_memories (
-                    id           TEXT PRIMARY KEY,
-                    project_path TEXT NOT NULL,
-                    title        TEXT NOT NULL,
-                    content      TEXT NOT NULL,
-                    keywords     TEXT NOT NULL,
-                    created_at   TEXT NOT NULL,
-                    updated_at   TEXT NOT NULL
-                )
-            """)
+            # ── project_memories ─────────────────────────────────────────────────
+            proj_cols = [r[1] for r in conn.execute("PRAGMA table_info(project_memories)")]
+            if not proj_cols:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS project_memories (
+                        id           TEXT PRIMARY KEY,
+                        project_path TEXT NOT NULL,
+                        title        TEXT NOT NULL,
+                        content      TEXT NOT NULL,
+                        keywords     TEXT NOT NULL,
+                        created_at   TEXT NOT NULL,
+                        updated_at   TEXT NOT NULL
+                    )
+                """)
 
-            # 建 project_memories FTS5
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS project_memories_fts USING fts5(
                     id UNINDEXED, title, content, keywords, tokenize='unicode61'
@@ -132,14 +135,16 @@ class MemoryManager:
 
     def add_preference(
         self,
+        user_open_id: str,
         title: str,
         content: str,
         keywords: str,
     ) -> UserPreference:
-        """添加一条用户偏好（全局）"""
+        """添加一条用户偏好（按飞书用户隔离）"""
         now = datetime.utcnow().isoformat()
         pref = UserPreference(
             id=str(uuid.uuid4())[:8],
+            user_open_id=user_open_id,
             title=title,
             content=content,
             keywords=keywords,
@@ -148,9 +153,10 @@ class MemoryManager:
         )
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
-                "INSERT INTO user_preferences (id, title, content, keywords, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (pref.id, pref.title, pref.content, pref.keywords, pref.created_at, pref.updated_at)
+                "INSERT INTO user_preferences (id, user_open_id, title, content, keywords, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (pref.id, pref.user_open_id, pref.title, pref.content,
+                 pref.keywords, pref.created_at, pref.updated_at)
             )
             conn.execute(
                 "INSERT INTO user_preferences_fts(id, title, content, keywords) VALUES (?, ?, ?, ?)",
@@ -169,39 +175,55 @@ class MemoryManager:
             ).fetchall()
         return [UserPreference(**{k: v for k, v in dict(r).items() if k != "_rank"}) for r in rows]
 
-    def search_preferences(self, query: str, limit: int = 5) -> list[UserPreference]:
+    def get_preferences_by_user(self, user_open_id: str) -> list[UserPreference]:
+        """获取指定用户的所有偏好（按创建时间倒序）"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM user_preferences WHERE user_open_id = ? ORDER BY created_at DESC",
+                (user_open_id,)
+            ).fetchall()
+        return [UserPreference(**{k: v for k, v in dict(r).items() if k != "_rank"}) for r in rows]
+
+    def search_preferences(
+        self,
+        query: str,
+        user_open_id: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[UserPreference]:
         """
-        全文搜索用户偏好：keywords 优先（prefix 匹配），无结果再搜 title + content。
+        全文搜索用户偏好：按 user_open_id 过滤，keywords 优先（prefix 匹配），无结果再搜 title + content。
         """
         if not query.strip():
             return []
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            # 第一步：只搜 keywords（前缀匹配，兼容中文）
             keywords_query = _tokenize(query)
-            rows = conn.execute(f"""
-                SELECT m.id, m.title, m.content, m.keywords,
-                       m.created_at, m.updated_at,
-                       bm25(user_preferences_fts) as _rank
-                FROM user_preferences_fts
-                JOIN user_preferences m ON user_preferences_fts.id = m.id
-                WHERE user_preferences_fts MATCH ?
-                ORDER BY _rank
-                LIMIT ?
-            """, (keywords_query, limit)).fetchall()
-            # 第二步：keywords 无结果，再搜 title + content（分词后匹配）
+
+            base_cols = "m.id, m.user_open_id, m.title, m.content, m.keywords, m.created_at, m.updated_at"
+
+            def _run(query_str: str):
+                if user_open_id:
+                    return conn.execute(
+                        f"SELECT {base_cols}, bm25(user_preferences_fts) as _rank "
+                        "FROM user_preferences_fts "
+                        "JOIN user_preferences m ON user_preferences_fts.id = m.id "
+                        "WHERE user_preferences_fts MATCH ? AND m.user_open_id = ? "
+                        "ORDER BY _rank LIMIT ?",
+                        (query_str, user_open_id, limit)
+                    ).fetchall()
+                else:
+                    return conn.execute(
+                        f"SELECT {base_cols}, bm25(user_preferences_fts) as _rank "
+                        "FROM user_preferences_fts "
+                        "JOIN user_preferences m ON user_preferences_fts.id = m.id "
+                        "WHERE user_preferences_fts MATCH ? ORDER BY _rank LIMIT ?",
+                        (query_str, limit)
+                    ).fetchall()
+
+            rows = _run(keywords_query)
             if not rows:
-                fallback_query = _tokenize(query)
-                rows = conn.execute(f"""
-                    SELECT m.id, m.title, m.content, m.keywords,
-                           m.created_at, m.updated_at,
-                           bm25(user_preferences_fts) as _rank
-                    FROM user_preferences_fts
-                    JOIN user_preferences m ON user_preferences_fts.id = m.id
-                    WHERE user_preferences_fts MATCH ?
-                    ORDER BY _rank
-                    LIMIT ?
-                """, (fallback_query, limit)).fetchall()
+                rows = _run(keywords_query)
         return [UserPreference(**{k: v for k, v in dict(r).items() if k != "_rank"}) for r in rows]
 
     def update_preference(
@@ -240,11 +262,15 @@ class MemoryManager:
             conn.execute("DELETE FROM user_preferences_fts WHERE id = ?", (pref_id,))
         return affected > 0
 
-    def inject_context(self, project_path: Optional[str]) -> str:
+    def inject_context(
+        self,
+        user_open_id: str,
+        project_path: Optional[str] = None,
+    ) -> str:
         """
-        注入用户偏好到 prompt（全量返回，无搜索）。
+        注入指定用户的偏好到 prompt（按 user_open_id 过滤，全量返回）。
         """
-        prefs = self.get_all_preferences()
+        prefs = self.get_preferences_by_user(user_open_id)
         if not prefs:
             return ""
         lines = ["\n【用户偏好】", "---"]
