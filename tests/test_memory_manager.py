@@ -40,7 +40,7 @@ def test_project_memories_isolated_by_path(mgr):
 def test_inject_context_returns_all_preferences(mgr):
     """inject_context 返回指定用户的 user_preferences"""
     mgr.add_preference("ou_test", "主人信息", "我叫狗蛋", "狗蛋")
-    ctx = mgr.inject_context("ou_test", project_path="/any/path")
+    ctx = mgr.inject_context("ou_test")
     assert "主人信息" in ctx
     assert "我叫狗蛋" in ctx
 
@@ -49,7 +49,7 @@ def test_inject_context_format_correctly(mgr):
     """inject_context 格式正确：标题+内容"""
     mgr.add_preference("ou_test", "发版规则", "发版前必须确认", "发版,确认")
     mgr.add_preference("ou_test", "主人信息", "我叫狗蛋", "狗蛋")
-    ctx = mgr.inject_context("ou_test", project_path="/any/path")
+    ctx = mgr.inject_context("ou_test")
     assert "【用户偏好】" in ctx
     assert "发版规则" in ctx
     assert "发版前必须确认" in ctx
@@ -58,7 +58,7 @@ def test_inject_context_format_correctly(mgr):
 
 def test_inject_context_empty_when_no_preferences(mgr):
     """无用户偏好时返回空字符串"""
-    ctx = mgr.inject_context("ou_test", project_path="/any/path")
+    ctx = mgr.inject_context("ou_test")
     assert ctx == ""
 
 
