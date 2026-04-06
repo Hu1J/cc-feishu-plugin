@@ -165,7 +165,8 @@ class MemoryManager:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT * FROM user_preferences ORDER BY created_at DESC"
+                "SELECT id, title, content, keywords, created_at, updated_at "
+                "FROM user_preferences ORDER BY created_at DESC"
             ).fetchall()
         return [UserPreference(**{k: v for k, v in dict(r).items() if k != "_rank"}) for r in rows]
 
