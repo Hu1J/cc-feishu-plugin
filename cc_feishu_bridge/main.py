@@ -246,6 +246,14 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     config = load_config(config_path)
     handler = create_handler(config, data_dir)
 
+    # Start qmd for semantic memory search
+    from cc_feishu_bridge.claude.qmd_adapter import get_qmd_adapter
+    qmd_ok = get_qmd_adapter().start()
+    if qmd_ok:
+        logger.info("qmd memory search engine started")
+    else:
+        logger.warning("qmd unavailable — semantic memory search disabled")
+
     ws_client = FeishuWSClient(
         app_id=config.feishu.app_id,
         app_secret=config.feishu.app_secret,
@@ -261,6 +269,8 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     # Clean up PID file and lock on exit
     proactive = None
     def cleanup(signum, frame):
+        from cc_feishu_bridge.claude.qmd_adapter import get_qmd_adapter
+        get_qmd_adapter().stop()
         proactive.stop()
         remove_pid(pid_file)
         lock.release()
