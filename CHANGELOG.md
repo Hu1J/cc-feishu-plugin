@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.12] - 2026-04-06
+
+### Fixed
+- **`.zip` 文件发送失败**：飞书 file_type 不支持 `zip` 类型，报 `Invalid request param`；改为 `stream` 解决
+
 ## [0.3.11] - 2026-04-06
 
 ### Fixed
