@@ -181,7 +181,8 @@ class MemoryManager:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT * FROM user_preferences WHERE user_open_id = ? ORDER BY created_at DESC",
+                "SELECT id, user_open_id, title, content, keywords, created_at, updated_at "
+                "FROM user_preferences WHERE user_open_id = ? ORDER BY created_at DESC",
                 (user_open_id,)
             ).fetchall()
         return [UserPreference(**{k: v for k, v in dict(r).items() if k != "_rank"}) for r in rows]
@@ -330,8 +331,8 @@ class MemoryManager:
                     keywords=mem.keywords,
                     project_path=mem.project_path,
                 )
-        except Exception:
-            pass  # non-fatal, qmd sync failure should not block the operation
+        except Exception as e:
+            logger.warning("qmd sync failed for memory %s: %s", mem.id, e)
 
     def search_project_memories(
         self,
@@ -346,7 +347,7 @@ class MemoryManager:
             return []
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            # 第一步：只搜 keywords（前缀匹配，兼容中文）
+            # 按 keywords 分词匹配（兼容中文前缀匹配）
             keywords_query = _tokenize(query)
             rows = conn.execute(f"""
                 SELECT m.*, bm25(project_memories_fts) as rank
@@ -357,18 +358,6 @@ class MemoryManager:
                 ORDER BY rank
                 LIMIT ?
             """, (keywords_query, project_path, limit)).fetchall()
-            # 第二步：keywords 无结果，再搜 title + content（分词后匹配）
-            if not rows:
-                fallback_query = _tokenize(query)
-                rows = conn.execute(f"""
-                    SELECT m.*, bm25(project_memories_fts) as rank
-                    FROM project_memories_fts
-                    JOIN project_memories m ON project_memories_fts.id = m.id
-                    WHERE project_memories_fts MATCH ?
-                      AND m.project_path = ?
-                    ORDER BY rank
-                    LIMIT ?
-                """, (fallback_query, project_path, limit)).fetchall()
         results = []
         for row in rows:
             mem = ProjectMemory(
@@ -477,13 +466,27 @@ class MemoryManager:
         return affected > 0
 
     def clear_project_memories(self, project_path: str) -> int:
-        """清空某项目下所有记忆"""
+        """清空某项目下所有记忆（SQLite + qmd 同步删除）"""
         if not project_path:
             return 0
         with sqlite3.connect(self.db_path) as conn:
-            count = conn.execute(
-                "SELECT COUNT(*) FROM project_memories WHERE project_path = ?",
+            rows = conn.execute(
+                "SELECT id FROM project_memories WHERE project_path = ?",
                 (project_path,)
-            ).fetchone()[0]
+            ).fetchall()
+            count = len(rows)
             conn.execute("DELETE FROM project_memories WHERE project_path = ?", (project_path,))
+            conn.execute("DELETE FROM project_memories_fts WHERE id IN "
+                         "(SELECT id FROM project_memories WHERE project_path = ?)", (project_path,))
+
+        # 同步清理 qmd 中的文件
+        if count > 0:
+            try:
+                from cc_feishu_bridge.claude.qmd_adapter import get_qmd_adapter
+                adapter = get_qmd_adapter()
+                if adapter.is_available():
+                    for row in rows:
+                        adapter.remove_memory(row["id"], project_path)
+            except Exception:
+                pass  # non-fatal
         return count

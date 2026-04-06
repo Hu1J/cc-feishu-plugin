@@ -134,12 +134,12 @@ class QmdAdapter:
             except FileNotFoundError:
                 logger.warning("qmd CLI not found — semantic search disabled")
                 self._initialized = False
-                self._started = True
+                # 不设置 _started=True，允许下次重试
                 return False
             except Exception as e:
                 logger.warning("qmd start failed: %s", e)
                 self._initialized = False
-                self._started = True
+                # 不设置 _started=True，允许下次重试
                 return False
 
     def stop(self):
@@ -232,9 +232,9 @@ class QmdAdapter:
 
         try:
             proj_hash = _proj_hash(project_path)
-            # Query for a common char to get broad results, filter by path
+            # Query for a space to get broad results, filter by path
             result = self._qmd([
-                "query", "的",
+                "query", " ",
                 "--collection", QMD_COLLECTION,
                 "--format", "json",
                 "--full",
@@ -358,10 +358,13 @@ def _extract_keywords(body: str) -> str:
 
 # Singleton
 _qmd_adapter: Optional[QmdAdapter] = None
+_qmd_adapter_lock = threading.Lock()
 
 
 def get_qmd_adapter() -> QmdAdapter:
     global _qmd_adapter
     if _qmd_adapter is None:
-        _qmd_adapter = QmdAdapter()
+        with _qmd_adapter_lock:
+            if _qmd_adapter is None:  # 双重检查
+                _qmd_adapter = QmdAdapter()
     return _qmd_adapter

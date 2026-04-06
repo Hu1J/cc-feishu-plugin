@@ -1,6 +1,8 @@
 """Memory MCP tools — 10 tools, one per /memory command."""
 from __future__ import annotations
 
+import threading
+
 from cc_feishu_bridge.claude.memory_manager import MemoryManager
 
 
@@ -133,10 +135,9 @@ def _build_memory_mcp_server():
     @tool(
         "MemoryDeleteProj",
         "删除指定 ID 的项目记忆（SQLite + qmd 同步删除）。",
-        {"id": str, "project_path": str},
+        {"id": str},
     )
     async def memory_delete_proj(args: dict) -> dict:
-        project_path = args.get("project_path", "").strip()
         mm = MemoryManager()
         ok = mm.delete_project_memory(args["id"])
         if ok:
@@ -248,10 +249,13 @@ def _build_memory_mcp_server():
 
 
 _mcp_server = None
+_mcp_server_lock = threading.Lock()
 
 
 def get_memory_mcp_server():
     global _mcp_server
     if _mcp_server is None:
-        _mcp_server = _build_memory_mcp_server()
+        with _mcp_server_lock:
+            if _mcp_server is None:  # 双重检查
+                _mcp_server = _build_memory_mcp_server()
     return _mcp_server
