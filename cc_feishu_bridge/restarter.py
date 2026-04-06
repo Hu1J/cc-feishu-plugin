@@ -331,21 +331,21 @@ def check_version() -> tuple[str, str]:
 # Step labels for update CLI display
 _UPDATE_CLI_STEP_LABELS = [
     "检查更新", "下载新版本", "下载完成",
-    "准备重启", "启动新 bridge", "等待新进程就绪", "重启完成",
+    "准备重启", "清理文件锁", "启动新实例", "检查新实例", "重启完成",
 ]
 
 # Step labels for update Feishu messages
 _UPDATE_FEISHU_STEP_LABELS = [
     "📋 检查更新", "⬇️ 下载新版本", "✅ 下载完成",
-    "🔄 准备重启", "🚀 启动新 bridge", "⏳ 等待新进程就绪", "✅ 重启完成",
+    "🛑 准备重启", "🧹 清理文件锁", "🚀 启动新实例", "🔍 检查新实例", "✅ 重启完成",
 ]
 
 
 @dataclass
 class UpdateStep:
     """A single step in the update process, yielded as it happens."""
-    step: int          # 1–7
-    total: int         # always 7
+    step: int          # 1–8
+    total: int         # always 8
     label: str         # short label shown to user
     status: str        # "done" | "final" | "skip"
     detail: str = ""   # extra info
@@ -363,14 +363,14 @@ def _do_update(file_lock=None):
     # Step 1: 检查更新
     current_ver, latest_ver = check_version()
     yield UpdateStep(
-        step=1, total=7,
+        step=1, total=8,
         label=_UPDATE_CLI_STEP_LABELS[0],
         status="done",
         detail=f"{current_ver} → {latest_ver}",
     )
     if packaging.version.parse(latest_ver) <= packaging.version.parse(current_ver):
         yield UpdateStep(
-            step=2, total=7,
+            step=2, total=8,
             label=_UPDATE_CLI_STEP_LABELS[1],
             status="skip",
             detail=current_ver,
@@ -379,7 +379,7 @@ def _do_update(file_lock=None):
         return
 
     # Step 2: 下载新版本
-    yield UpdateStep(step=2, total=7, label=_UPDATE_CLI_STEP_LABELS[1], status="done",
+    yield UpdateStep(step=2, total=8, label=_UPDATE_CLI_STEP_LABELS[1], status="done",
                      detail=f"{current_ver} → {latest_ver}")
     try:
         result = subprocess.run(
@@ -394,13 +394,13 @@ def _do_update(file_lock=None):
         raise RestartError(f"pip install 失败: {e}")
 
     # Step 3: 下载完成
-    yield UpdateStep(step=3, total=7, label=_UPDATE_CLI_STEP_LABELS[2], status="done")
+    yield UpdateStep(step=3, total=8, label=_UPDATE_CLI_STEP_LABELS[2], status="done")
 
-    # Step 4-7: 复用 _restart_to（偏移 3）
+    # Step 4-8: 复用 _restart_to（偏移 3）
     for restart_step in _restart_to(file_lock=file_lock):
         yield UpdateStep(
             step=restart_step.step + 3,
-            total=7,
+            total=8,
             label=_UPDATE_CLI_STEP_LABELS[restart_step.step + 2],
             status=restart_step.status,
             detail=restart_step.detail,
@@ -420,7 +420,7 @@ async def run_update(file_lock, feishu: "FeishuClient",
         True if an actual update (pip install) was performed, False if already latest (skipped).
     """
     current_path = os.getcwd()
-    total = 7
+    total = 8
 
     for step_obj in _do_update(file_lock=file_lock):
         if step_obj.status == "skip":
@@ -511,7 +511,7 @@ def run_update_cli(file_lock, feishu=None, chat_id: str | None = None):
         await _send(initial)
 
         for step_obj in steps:
-            bar = "▓" * step_obj.step + "░" * (7 - step_obj.step)
+            bar = "▓" * step_obj.step + "░" * (8 - step_obj.step)
             label = (_UPDATE_FEISHU_STEP_LABELS[step_obj.step - 1]
                      if step_obj.step <= len(_UPDATE_FEISHU_STEP_LABELS)
                      else f"步骤 {step_obj.step}")
@@ -532,7 +532,7 @@ def run_update_cli(file_lock, feishu=None, chat_id: str | None = None):
                 card = (
                     f"## 🔄 正在更新\n\n"
                     f"{detail_line}"
-                    f"{bar} `{step_obj.step}/7` {label}\n\n"
+                    f"{bar} `{step_obj.step}/8` {label}\n\n"
                     f"⏳ 正在更新，请稍候..."
                 )
                 await _send(card)
