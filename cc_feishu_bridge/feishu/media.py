@@ -120,7 +120,7 @@ EXT_TO_FILE_TYPE = {
     ".ppt": "ppt",
     ".pptx": "ppt",
     # 压缩包
-    ".zip": "zip",
+    ".zip": "stream",
     ".tar": "stream",
     ".gz": "stream",
     ".7z": "stream",
