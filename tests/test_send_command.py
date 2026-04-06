@@ -25,10 +25,12 @@ class TestGuessFileType:
         assert guess_file_type(".jpg") == "png"  # 飞书统一用 png
 
     def test_zip(self):
-        assert guess_file_type(".zip") == "zip"
+        # 飞书不支持 zip 类型，走 stream
+        assert guess_file_type(".zip") == "stream"
 
     def test_txt(self):
-        assert guess_file_type(".txt") == "txt"
+        # 飞书不支持 txt 类型，走 stream
+        assert guess_file_type(".txt") == "stream"
 
     def test_unknown(self):
         # 未知扩展名走 stream（保持原扩展名不变，飞书也能接受）

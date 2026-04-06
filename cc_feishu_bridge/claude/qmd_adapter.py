@@ -146,6 +146,7 @@ class QmdAdapter:
         """Stop adapter (no-op for CLI mode)."""
         with self._lock:
             self._initialized = False
+            self._started = False
 
     def is_available(self) -> bool:
         """True if qmd CLI is available and collection was initialized."""

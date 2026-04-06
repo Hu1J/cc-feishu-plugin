@@ -16,17 +16,21 @@ import tempfile
 
 
 class TestSanitizeFilename:
-    def test_replaces_spaces(self):
-        assert sanitize_filename("my file name") == "my_file_name"
+    def test_keeps_unicode(self):
+        # 中文等 Unicode 字符全部保留
+        assert sanitize_filename("我的文件") == "我的文件"
 
     def test_replaces_slashes(self):
+        # 路径分隔符替换为下划线
         assert sanitize_filename("doc/v2/test") == "doc_v2_test"
 
     def test_keeps_underscores_and_dots(self):
         assert sanitize_filename("my_file.v2.pdf") == "my_file.v2.pdf"
 
-    def test_replaces_special_chars(self):
-        assert sanitize_filename("file<>:\"|?*.txt") == "file_______.txt"
+    def test_replaces_only_dangerous_chars(self):
+        # 只移除文件系统危险字符：/ \ : NUL
+        assert sanitize_filename("file<>:\"|?*.txt") == "file<>_\"|?*.txt"
+        assert sanitize_filename("file/name:here") == "file_name_here"
 
 
 class TestMimeToExt:
