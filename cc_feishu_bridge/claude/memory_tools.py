@@ -16,11 +16,12 @@ def _fmt_pref(p) -> str:
 
 
 def _fmt_proj(m) -> str:
+    proj = m.project_path or "(未知项目)"
     return "\n".join([
         f"[项目记忆] **{m.title}**",
         f"  {m.content}",
         f"  关键词: {m.keywords}",
-        f"  项目: {m.project_path}",
+        f"  项目: {proj}",
         f"  ID: `{m.id}`",
     ])
 
@@ -43,7 +44,10 @@ def _build_memory_mcp_server():
         if not title or not content or not keywords:
             return {"content": [{"type": "text", "text": "title、content、keywords 三样必填"}], "is_error": True}
         mm = MemoryManager()
-        p = mm.add_preference(user_open_id, title, content, keywords)
+        try:
+            p = mm.add_preference(user_open_id, title, content, keywords)
+        except ValueError as e:
+            return {"content": [{"type": "text", "text": f"输入过长：{e}"}], "is_error": True}
         return {"content": [{"type": "text", "text": f"✅ 用户偏好已保存\n\n{_fmt_pref(p)}"}]}
 
     @tool(
@@ -129,7 +133,10 @@ def _build_memory_mcp_server():
         if not project_path:
             return {"content": [{"type": "text", "text": "project_path 不能为空"}], "is_error": True}
         mm = MemoryManager()
-        m = mm.add_project_memory(project_path, title, content, keywords)
+        try:
+            m = mm.add_project_memory(project_path, title, content, keywords)
+        except ValueError as e:
+            return {"content": [{"type": "text", "text": f"输入过长：{e}"}], "is_error": True}
         return {"content": [{"type": "text", "text": f"✅ 项目记忆已保存\n\n{_fmt_proj(m)}"}]}
 
     @tool(

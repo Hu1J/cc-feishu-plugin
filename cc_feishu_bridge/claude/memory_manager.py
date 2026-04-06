@@ -141,6 +141,13 @@ class MemoryManager:
         keywords: str,
     ) -> UserPreference:
         """添加一条用户偏好（按飞书用户隔离）"""
+        for name, val, max_len in (
+            ("title", title, 500),
+            ("content", content, 5000),
+            ("keywords", keywords, 500),
+        ):
+            if len(val) > max_len:
+                raise ValueError(f"{name} 长度超过上限 {max_len}（当前 {len(val)}）")
         now = datetime.utcnow().isoformat()
         pref = UserPreference(
             id=str(uuid.uuid4())[:8],
@@ -290,6 +297,13 @@ class MemoryManager:
         keywords: str,
     ) -> ProjectMemory:
         """添加一条项目记忆（按项目隔离）"""
+        for name, val, max_len in (
+            ("title", title, 500),
+            ("content", content, 5000),
+            ("keywords", keywords, 500),
+        ):
+            if len(val) > max_len:
+                raise ValueError(f"{name} 长度超过上限 {max_len}（当前 {len(val)}）")
         now = datetime.utcnow().isoformat()
         mem = ProjectMemory(
             id=str(uuid.uuid4())[:8],

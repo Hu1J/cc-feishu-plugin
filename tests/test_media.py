@@ -32,6 +32,36 @@ class TestSanitizeFilename:
         assert sanitize_filename("file<>:\"|?*.txt") == "file<>_\"|?*.txt"
         assert sanitize_filename("file/name:here") == "file_name_here"
 
+    def test_length_limit_200_bytes(self):
+        # 超过 200 UTF-8 字节时截断
+        long_name = "中" * 100  # 每个汉字 3 字节，100 个 = 300 字节 > 200
+        result = sanitize_filename(long_name)
+        assert len(result.encode("utf-8")) <= 200
+        assert result  # 不为空
+
+    def test_length_limit_preserves_ending_if_possible(self):
+        # 截断时优先保留有意义的字符（尾随 _ 会被 rstrip）
+        result = sanitize_filename("a" * 250)
+        assert len(result.encode("utf-8")) <= 200
+        assert result == "a" * 200  # 全 ASCII，精确截断
+
+    def test_trim_trailing_underscores(self):
+        # 截断后尾部 _ 来自危险字符替换，应被裁掉
+        result = sanitize_filename("file/" + "x" * 200)
+        assert not result.endswith("_")
+        assert len(result.encode("utf-8")) <= 200
+
+    def test_fallback_to_file_on_empty(self):
+        # 极端情况：截断后全空或只剩 _，返回 "file"
+        result = sanitize_filename("_" * 300)  # 全 _ 截断后 rstrip 成空
+        assert result == "file"
+
+    def test_short_underscore_name_not_truncated(self):
+        # 短名称（< 200 字节）直接返回，不截断
+        result = sanitize_filename("/" * 100)
+        assert result == "_" * 100
+        assert len(result) == 100
+
 
 class TestMimeToExt:
     def test_png(self):

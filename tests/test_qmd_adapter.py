@@ -142,3 +142,88 @@ def test_singleton():
     assert a is b
     # QmdAdapter is shared singleton
     assert isinstance(a, QmdAdapter)
+
+
+class TestEscapeMd:
+    """Tests for _escape_md — markdown special character escaping."""
+
+    def test_escapes_backtick(self):
+        from cc_feishu_bridge.claude.qmd_adapter import _escape_md
+        assert _escape_md("foo`bar") == r"foo\`bar"
+
+    def test_escapes_asterisk(self):
+        from cc_feishu_bridge.claude.qmd_adapter import _escape_md
+        assert _escape_md("foo*bar") == r"foo\*bar"
+
+    def test_escapes_underscore(self):
+        from cc_feishu_bridge.claude.qmd_adapter import _escape_md
+        assert _escape_md("foo_bar") == r"foo\_bar"
+
+    def test_escapes_brackets(self):
+        from cc_feishu_bridge.claude.qmd_adapter import _escape_md
+        assert _escape_md("foo[bar]") == r"foo\[bar\]"
+
+    def test_escapes_hash(self):
+        from cc_feishu_bridge.claude.qmd_adapter import _escape_md
+        assert _escape_md("# title") == r"\# title"
+
+    def test_escapes_pipe(self):
+        from cc_feishu_bridge.claude.qmd_adapter import _escape_md
+        assert _escape_md("a|b") == r"a\|b"
+
+    def test_escapes_backslash(self):
+        from cc_feishu_bridge.claude.qmd_adapter import _escape_md
+        assert _escape_md(r"a\b") == r"a\\b"
+
+    def test_preserves_chinese(self):
+        from cc_feishu_bridge.claude.qmd_adapter import _escape_md
+        assert _escape_md("中文测试") == "中文测试"
+
+    def test_escape_all_together(self):
+        from cc_feishu_bridge.claude.qmd_adapter import _escape_md
+        title = "Test: *title* with `code` [and] _more_"
+        result = _escape_md(title)
+        assert "\\*" in result
+        assert "\\`" in result
+        assert "\\[" in result
+        assert "\\_" in result
+        assert "Test:" in result  # colon preserved
+
+
+class TestBuildMdContent:
+    """Tests for _build_md_content markdown escaping."""
+
+    def test_title_escaped(self):
+        from cc_feishu_bridge.claude.qmd_adapter import QmdAdapter, _escape_md
+        adapter = QmdAdapter()
+        content = adapter._build_md_content(
+            title="My *Bold* Title",
+            content="Normal content",
+            keywords="kw1,kw2",
+            project_path="/path/to/proj",
+        )
+        assert r"\*" in content
+        assert "My \\*Bold\\* Title" in content
+
+    def test_content_escaped(self):
+        from cc_feishu_bridge.claude.qmd_adapter import QmdAdapter
+        adapter = QmdAdapter()
+        content = adapter._build_md_content(
+            title="Title",
+            content="List:\n- item1\n- item2",
+            keywords="kw",
+            project_path="/path",
+        )
+        assert "\\-" in content
+
+    def test_project_path_escaped(self):
+        from cc_feishu_bridge.claude.qmd_adapter import QmdAdapter
+        adapter = QmdAdapter()
+        content = adapter._build_md_content(
+            title="Title",
+            content="Content",
+            keywords="kw",
+            project_path="/path/[v1]/test",
+        )
+        assert "\\[" in content
+        assert "\\]" in content

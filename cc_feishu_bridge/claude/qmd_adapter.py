@@ -162,10 +162,10 @@ class QmdAdapter:
         project_path: str,
     ) -> str:
         return (
-            f"# {title}\n\n"
-            f"{content}\n\n"
-            f"**Keywords**: {keywords}\n"
-            f"**Project**: {project_path}\n"
+            f"# {_escape_md(title)}\n\n"
+            f"{_escape_md(content)}\n\n"
+            f"**Keywords**: {_escape_md(keywords)}\n"
+            f"**Project**: {_escape_md(project_path)}\n"
         )
 
     def add_memory(
@@ -346,6 +346,28 @@ class QmdAdapter:
             lines.append(f"  {summary}")
             lines.append(f"  相关度: {doc.score:.2f}  ID: `{doc.memory_id}`")
         return "\n".join(lines)
+
+
+def _escape_md(text: str) -> str:
+    """Escape markdown special characters to prevent rendering issues."""
+    return (
+        text.replace("\\", "\\\\")
+            .replace("`", "\\`")
+            .replace("*", "\\*")
+            .replace("_", "\\_")
+            .replace("{", "\\{")
+            .replace("}", "\\}")
+            .replace("[", "\\[")
+            .replace("]", "\\]")
+            .replace("(", "\\(")
+            .replace(")", "\\)")
+            .replace("#", "\\#")
+            .replace("+", "\\+")
+            .replace("-", "\\-")
+            .replace(".", "\\.")
+            .replace("!", "\\!")
+            .replace("|", "\\|")
+    )
 
 
 def _extract_keywords(body: str) -> str:
