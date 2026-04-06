@@ -218,7 +218,10 @@ class MessageHandler:
         if session and session.chat_id != message.chat_id:
             self.sessions.update_chat_id(message.user_open_id, message.chat_id)
 
-        memory_context = MEMORY_SYSTEM_GUIDE + self.memory_manager.inject_context(project_path=self.approved_directory)
+        memory_context = MEMORY_SYSTEM_GUIDE + self.memory_manager.inject_context(
+            user_open_id=message.user_open_id,
+            project_path=self.approved_directory,
+        )
         await self._run_query(message, session, sdk_session_id, memory_context)
 
     async def _handle_command(self, message: IncomingMessage) -> HandlerResult:
