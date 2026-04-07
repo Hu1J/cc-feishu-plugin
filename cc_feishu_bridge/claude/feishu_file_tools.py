@@ -9,6 +9,39 @@ from typing import Optional
 SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 MAX_FILE_SIZE = 30 * 1024 * 1024  # 30MB
 
+
+def _resolve_path(file_path: str) -> str:
+    """将相对路径尝试解析为绝对路径。
+
+    尝试顺序：原始路径 → 当前工作目录 → bridge 配置的 approved_directory。
+    只在相对路径且原路径不存在时才尝试解析。
+    """
+    if os.path.isabs(file_path) and os.path.exists(file_path):
+        return file_path
+    if os.path.exists(file_path):
+        return os.path.abspath(file_path)
+
+    # 相对路径：尝试从 config 里的 approved_directory 解析
+    candidates = []
+    try:
+        from cc_feishu_bridge.config import load_config, resolve_config_path
+        cfg_path, data_dir = resolve_config_path()
+        config = load_config(cfg_path)
+        approved = config.claude.approved_directory
+        if approved:
+            candidates.append(os.path.join(approved, file_path))
+    except Exception:
+        pass
+
+    candidates.append(os.path.join(os.getcwd(), file_path))
+
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return os.path.abspath(candidate)
+
+    # 找不到就返回原路径，让后面的 open() 报文件不存在
+    return file_path
+
 FEISHU_FILE_GUIDE = """
 【飞书文件发送】当用户要求发送文件/图片/截图/压缩包时，调用 mcp__feishu_file__FeishuSendFile(file_paths: list[str])，MCP 自动从当前会话获取 chat_id。
 """
@@ -48,10 +81,11 @@ async def _send_single_file(file_path: str, chat_id: str) -> str:
     from cc_feishu_bridge.feishu.client import FeishuClient
 
     feishu = _get_feishu_client()
-    ext = os.path.splitext(file_path)[1].lower()
-    file_name = os.path.basename(file_path)
+    resolved_path = _resolve_path(file_path)
+    ext = os.path.splitext(resolved_path)[1].lower()
+    file_name = os.path.basename(resolved_path)
 
-    with open(file_path, "rb") as f:
+    with open(resolved_path, "rb") as f:
         data = f.read()
 
     if ext in SUPPORTED_IMAGE_EXTS:
