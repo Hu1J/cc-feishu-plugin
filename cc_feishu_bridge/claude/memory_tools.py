@@ -142,19 +142,19 @@ def _build_memory_mcp_server():
     @tool(
         "MemoryDeleteProj",
         "删除指定 ID 的项目记忆。",
-        {"id": str},
+        {"id": str, "project_path": str},
     )
     async def memory_delete_proj(args: dict) -> dict:
         mm = get_memory_manager()
-        ok = mm.delete_project_memory(args["id"])
-        if ok:
-            return {"content": [{"type": "text", "text": f"🗑️ 项目记忆 {args['id']} 已删除。"}]}
+        deleted = mm.delete_project_memory(args["id"])
+        if deleted:
+            return {"content": [{"type": "text", "text": f"🗑️ 项目记忆 {deleted['id']} 已删除。"}]}
         return {"content": [{"type": "text", "text": f"未找到 id={args['id']} 的项目记忆"}], "is_error": True}
 
     @tool(
         "MemoryUpdateProj",
-        "更新指定 ID 的项目记忆（语义搜索，按项目隔离）。title + content + keywords 三样必填，关键词用逗号分隔。",
-        {"id": str, "title": str, "content": str, "keywords": str},
+        "更新指定 ID 的项目记忆（按项目隔离）。title + content + keywords 三样必填，关键词用逗号分隔。",
+        {"id": str, "title": str, "content": str, "keywords": str, "project_path": str},
     )
     async def memory_update_proj(args: dict) -> dict:
         title = args.get("title", "").strip()
