@@ -100,6 +100,9 @@ class MemoryManager:
     # ── 类级别共享缓存（所有实例共享同一份，防止多实例缓存碎片化）─────────────
     _tfidf_cache: dict = {}
     _tfidf_lock = threading.Lock()
+    # 用户偏好内存缓存：{(db_path, user_open_id): [UserPreference, ...]}
+    _prefs_cache: dict = {}
+    _prefs_cache_lock = threading.Lock()
 
     def _init_db(self):
         """创建/升级数据库：新建表或迁移已有表"""
@@ -189,6 +192,9 @@ class MemoryManager:
                 "INSERT INTO user_preferences_fts(id, title, content, keywords) VALUES (?, ?, ?, ?)",
                 (pref.id, pref.title, f"{pref.title} {pref.content} {pref.keywords}", pref.keywords)
             )
+        # Invalidate user preference cache
+        with self._prefs_cache_lock:
+            self._prefs_cache.pop((self.db_path, user_open_id), None)
         return pref
 
     def get_all_preferences(self) -> list[UserPreference]:
@@ -202,7 +208,12 @@ class MemoryManager:
         return [UserPreference(**{k: v for k, v in dict(r).items() if k != "_rank"}) for r in rows]
 
     def get_preferences_by_user(self, user_open_id: str) -> list[UserPreference]:
-        """获取指定用户的所有偏好（按创建时间倒序）"""
+        """获取指定用户的所有偏好（按创建时间倒序，带内存缓存）。"""
+        cache_key = (self.db_path, user_open_id)
+        with self._prefs_cache_lock:
+            if cache_key in self._prefs_cache:
+                return list(self._prefs_cache[cache_key])
+
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
@@ -210,7 +221,11 @@ class MemoryManager:
                 "FROM user_preferences WHERE user_open_id = ? ORDER BY created_at DESC",
                 (user_open_id,)
             ).fetchall()
-        return [UserPreference(**{k: v for k, v in dict(r).items() if k != "_rank"}) for r in rows]
+        prefs = [UserPreference(**{k: v for k, v in dict(r).items() if k != "_rank"}) for r in rows]
+
+        with self._prefs_cache_lock:
+            self._prefs_cache[cache_key] = list(prefs)
+        return prefs
 
     def search_preferences(
         self,
@@ -260,6 +275,12 @@ class MemoryManager:
         """更新一条用户偏好"""
         now = datetime.utcnow().isoformat()
         with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT user_open_id FROM user_preferences WHERE id = ?", (pref_id,)
+            ).fetchone()
+            uid = row["user_open_id"] if row else None
+
             affected = conn.execute("""
                 UPDATE user_preferences
                 SET title=?, content=?, keywords=?, updated_at=?
@@ -273,15 +294,29 @@ class MemoryManager:
                     "INSERT INTO user_preferences_fts(id, title, content, keywords) VALUES (?, ?, ?, ?)",
                     (pref_id, title, f"{title} {content} {keywords}", keywords)
                 )
+        # Invalidate user preference cache (keyed by db_path + user_open_id)
+        if uid:
+            with self._prefs_cache_lock:
+                self._prefs_cache.pop((self.db_path, uid), None)
         return affected > 0
 
     def delete_preference(self, pref_id: str) -> bool:
         """删除一条用户偏好"""
         with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT user_open_id FROM user_preferences WHERE id = ?", (pref_id,)
+            ).fetchone()
+            uid = row["user_open_id"] if row else None
+
             affected = conn.execute(
                 "DELETE FROM user_preferences WHERE id = ?", (pref_id,)
             ).rowcount
             conn.execute("DELETE FROM user_preferences_fts WHERE id = ?", (pref_id,))
+        # Invalidate user preference cache (keyed by db_path + user_open_id)
+        if uid:
+            with self._prefs_cache_lock:
+                self._prefs_cache.pop((self.db_path, uid), None)
         return affected > 0
 
     def inject_context(
@@ -535,24 +570,25 @@ class MemoryManager:
             self._invalidate_tfidf_cache(proj_path)
         return affected > 0
 
-    def delete_project_memory(self, memory_id: str) -> bool:
-        """删除一条项目记忆"""
+    def delete_project_memory(self, memory_id: str) -> dict | None:
+        """删除一条项目记忆，返回被删记录（删除前先查出）。"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
-                "SELECT project_path FROM project_memories WHERE id = ?", (memory_id,)
+                "SELECT id, project_path, title, content, keywords FROM project_memories WHERE id = ?",
+                (memory_id,),
             ).fetchone()
-            proj_path = row["project_path"] if row else ""
+            if row is None:
+                return None
 
-            affected = conn.execute(
-                "DELETE FROM project_memories WHERE id = ?", (memory_id,)
-            ).rowcount
+            deleted = dict(row)
+            conn.execute("DELETE FROM project_memories WHERE id = ?", (memory_id,))
             conn.execute("DELETE FROM project_memories_fts WHERE id = ?", (memory_id,))
 
-        # Invalidate TF-IDF cache
-        if proj_path:
-            self._invalidate_tfidf_cache(proj_path)
-        return affected > 0
+            proj_path = deleted.get("project_path", "")
+            if proj_path:
+                self._invalidate_tfidf_cache(proj_path)
+            return deleted
 
     def clear_project_memories(self, project_path: str) -> int:
         """清空某项目下所有记忆"""
