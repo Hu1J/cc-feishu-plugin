@@ -247,7 +247,7 @@ class ReplyFormatter:
         card_type 决定 stream_callback 如何渲染：
         - add     → 参数表格（标题列置顶）
         - update  → 参数表格（标题列置顶）
-        - delete  → 删除条目内容表格
+        - delete  → 删除条目 ID 表格
         - list    → 实际记忆条目表格（查库）
         - search  → 搜索匹配条目表格（查库）
         """

@@ -199,11 +199,9 @@ class _MemoryCardMarker:
     """记忆工具结果卡片标记 — 触发 Feishu Interactive Card 发送。
 
     card_type 决定 stream_callback 如何渲染卡片内容：
-    - add / add_user   → 参数表格（标题列置顶）
-    - update / update_user → 参数表格（标题列置顶）
-    - delete / delete_user → 删除条目内容表格
-    - list / list_user   → 实际记忆条目表格（需查库）
-    - search / search_user → 搜索匹配条目表格（需查库）
+    - add / update  → 参数表格（标题列置顶）
+    - delete        → 删除条目 ID 表格
+    - list / search → 实际记忆条目表格（需查库）
     """
     __slots__ = ("tool_name", "card_type", "entries", "tool_input")
 

@@ -405,7 +405,6 @@ class MessageHandler:
 
         short = marker.tool_name.replace("mcp__memory__", "")
         scope = "proj" if "Proj" in short else "user"
-        scope_icon = "📁" if scope == "proj" else "👤"
         card_type = marker.card_type or ""
 
         def _esc(s: str) -> str:
@@ -441,7 +440,7 @@ class MessageHandler:
             q = args.get("query", "")
             header += f"  查询: 「{q}」"
         if scope == "proj":
-            pp = args.get("project_path", "")
+            pp = args.get("project_path", "") or getattr(self, "_current_project_path", "")
             if pp:
                 header += f"  项目: {pp.split('/')[-1] or pp}"
         elif args.get("user_open_id"):
