@@ -42,7 +42,7 @@ def get_memory_manager() -> "MemoryManager":
 MEMORY_SYSTEM_GUIDE = """
 【记忆系统】工具前缀: mcp__memory__
 
-遇到问题先用 mcp__memory__MemorySearchProj 搜索项目记忆。
+收到用户提问，或 CC 开始在项目上开发前，先用 mcp__memory__MemorySearchProj 搜索项目记忆，看有没有相关信息。
 搜索没有 → 自己研究 → 成功后主动问"需要记住吗？"
 用户确认后用 mcp__memory__MemoryAddProj（关键词逗号分隔）
 
