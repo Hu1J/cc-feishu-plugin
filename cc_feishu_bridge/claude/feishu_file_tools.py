@@ -9,6 +9,15 @@ from typing import Optional
 SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 MAX_FILE_SIZE = 30 * 1024 * 1024  # 30MB
 
+FEISHU_FILE_GUIDE = """
+【飞书文件发送】工具前缀: mcp__feishu_file__
+
+当用户让 CC 发送文件、图片、截图、压缩包等给飞书用户时，使用 mcp__feishu_file__FeishuSendFile。
+MCP 内部自动从当前会话获取 chat_id，支持多文件并发发送。
+
+mcp__feishu_file__FeishuSendFile — 发送本地文件/图片到飞书（参数: file_paths: list[str]）
+"""
+
 
 def _get_feishu_client() -> "FeishuClient":
     """延迟初始化 FeishuClient（读取 config.yaml）。"""
