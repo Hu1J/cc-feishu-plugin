@@ -55,7 +55,7 @@ class ClaudeIntegration:
         session_id: str | None = None,
         cwd: str | None = None,
         on_stream: StreamCallback | None = None,
-        memory_context: str | None = None,
+        system_prompt_append: str | None = None,
     ) -> tuple[str, str | None, float]:
         """
         Send a message to Claude Code and get the response.
@@ -66,11 +66,6 @@ class ClaudeIntegration:
             from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
             from cc_feishu_bridge.claude.memory_tools import get_memory_mcp_server
 
-            # Build effective prompt with memory context
-            effective_prompt = prompt
-            if memory_context:
-                effective_prompt = f"{memory_context}\n\n{prompt}"
-
             options = ClaudeAgentOptions(
                 cwd=cwd or self.approved_directory or ".",
                 max_turns=self.max_turns,
@@ -80,6 +75,13 @@ class ClaudeIntegration:
                 continue_conversation=bool(session_id),
                 mcp_servers={"memory": get_memory_mcp_server()},
             )
+            # 追加记忆指南 + 用户偏好到系统提示词（preset 保留 claude_code 默认提示词）
+            if system_prompt_append:
+                options.system_prompt = {
+                    "type": "preset",
+                    "preset": "claude_code",
+                    "append": system_prompt_append,
+                }
 
             client = ClaudeSDKClient(options=options)
 
@@ -90,7 +92,7 @@ class ClaudeIntegration:
             async with client:
                 self._active_client = client
                 try:
-                    await client.query(prompt=effective_prompt, session_id=session_id)
+                    await client.query(prompt=prompt, session_id=session_id)
 
                     async for message in client.receive_response():
                         msg_type = type(message).__name__

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 
-from cc_feishu_bridge.format.edit_diff import build_edit_marker, build_write_marker, _DiffMarker
+from cc_feishu_bridge.format.edit_diff import build_edit_marker, build_write_marker, _DiffMarker, _MemoryCardMarker
 
 FEISHU_MAX_MESSAGE_LENGTH = 4096
 # Feishu CardKit limit for markdown tables per card
@@ -172,7 +172,12 @@ class ReplyFormatter:
         text = optimize_markdown_style(text, card_version=2)
         return text.strip()
 
-    def format_tool_call(self, tool_name: str, tool_input: str | None = None) -> str | _DiffMarker | list[_DiffMarker]:
+    def format_tool_call(
+        self,
+        tool_name: str,
+        tool_input: str | None = None,
+        **kwargs,
+    ) -> str | _DiffMarker | list[_DiffMarker] | _MemoryCardMarker:
         """Format a tool call notification for the user.
 
         Returns _DiffMarker for Edit/Write tools (to trigger colored card rendering),
@@ -203,6 +208,14 @@ class ReplyFormatter:
         elif tool_name == "TodoWrite":
             return self._format_todowrite_tool(tool_input)
 
+        # Memory MCP tools → 卡片标记（触发 Feishu Interactive Card）
+        elif tool_name and tool_name.startswith("mcp__memory__"):
+            return self._format_memory_tool(
+                tool_name, tool_input,
+                memory_manager=kwargs.get("memory_manager"),
+                default_project_path=kwargs.get("default_project_path", ""),
+            )
+
         # Read → 提取 file_path，用 backtick 包裹
         elif tool_name == "Read":
             return self._format_read_tool(tool_input)
@@ -218,6 +231,97 @@ class ReplyFormatter:
                 for chunk in chunks:
                     msg += f"\n`{chunk}`"
         return msg
+
+    # ── Memory MCP tool 格式化 ────────────────────────────────────────────────
+    _MEM_PAGE_SIZE = 5
+
+    def _format_memory_tool(
+        self,
+        tool_name: str,
+        tool_input: str,
+        memory_manager=None,
+        default_project_path: str = "",
+    ) -> _MemoryCardMarker | str:
+        """格式化记忆 MCP 工具调用为卡片标记。
+
+        card_type 决定 stream_callback 如何渲染：
+        - add     → 参数表格（标题列置顶）
+        - update  → 参数表格（标题列置顶）
+        - delete  → 删除条目 ID 表格
+        - list    → 实际记忆条目表格（查库）
+        - search  → 搜索匹配条目表格（查库）
+        """
+        try:
+            args = json.loads(tool_input) if tool_input else {}
+        except json.JSONDecodeError:
+            args = {}
+
+        short = tool_name.replace("mcp__memory__", "")
+        # MemoryAddProj → add_proj → card_type="add", scope="proj"
+        # MemoryListUser → list_user → card_type="list", scope="user"
+        parts = re.split(r"(?=[A-Z])", short.replace("Memory", ""))
+        card_type_map = {
+            "Add": "add", "Delete": "delete",
+            "Update": "update", "List": "list", "Search": "search",
+        }
+        card_type = None
+        scope = ""
+        for p in parts:
+            if p in card_type_map:
+                card_type = card_type_map[p]
+            else:
+                scope = p.lower()   # Proj → proj, User → user
+
+        # ── 根据操作类型查库获取真实 entries ───────────────────────────────
+        entries = []
+
+        if card_type in ("list", "search"):
+            # list/search — 查询实际条目（project_path 缺失时使用 default_project_path）
+            query = args.get("query", "")
+            project_path = args.get("project_path", "") or default_project_path
+            user_open_id = args.get("user_open_id", "")
+
+            if memory_manager is not None:
+                try:
+                    if scope == "proj":
+                        if card_type == "list":
+                            mems = memory_manager.get_project_memories(project_path)
+                            entries = [{"id": m.id, "title": m.title,
+                                        "content": m.content, "keywords": m.keywords} for m in mems]
+                        elif card_type == "search" and query:
+                            results = memory_manager.search_project_memories(query, project_path)
+                            entries = [{"id": r.memory.id, "title": r.memory.title,
+                                        "content": r.memory.content,
+                                        "keywords": r.memory.keywords} for r in results]
+                        else:
+                            entries = []
+                    else:
+                        # user scope
+                        if user_open_id:
+                            prefs = memory_manager.get_preferences_by_user(user_open_id)
+                            if card_type == "search" and query:
+                                prefs = memory_manager.search_preferences(query, user_open_id)
+                            entries = [{"id": p.id, "title": p.title,
+                                        "content": p.content, "keywords": p.keywords} for p in prefs]
+                        else:
+                            entries = []
+                except Exception:
+                    entries = []
+
+        elif card_type == "delete":
+            # delete — 直接用 tool_input 里的 id（CC 先删 DB，无法再查）
+            mem_id = args.get("id", "")
+            if mem_id:
+                entries = [{"id": mem_id}]
+
+        # add / update — entries 就是当前操作的参数
+        if not entries and card_type in ("add", "update"):
+            entries = [{"title": args.get("title", ""),
+                        "content": args.get("content", ""),
+                        "keywords": args.get("keywords", ""),
+                        "id": args.get("id", "") or "(新增)"}]
+
+        return _MemoryCardMarker(tool_name, card_type, entries, tool_input)
 
     def _format_bash_tool(self, tool_input: str) -> str:
         """Format Bash tool call as a markdown code block.

@@ -61,8 +61,17 @@ def file_type_to_mime(file_type: str) -> str:
 
 
 def sanitize_filename(name: str) -> str:
-    """清理文件名，只移除对文件系统有害的字符，保留 Unicode（中文等）。"""
-    return re.sub(r"[/\\:\x00]", "_", name)
+    """清理文件名，只移除对文件系统有害的字符，保留 Unicode（中文等）。
+
+    结果总长度（含扩展名）控制在 200 字节以内，防止路径超长。
+    """
+    cleaned = re.sub(r"[/\\:\x00]", "_", name)
+    if len(cleaned.encode("utf-8")) > 200:
+        # 按 UTF-8 字节数截断，再解码（可能丢尾字符，但不损及 ASCII 核）
+        truncated = cleaned.encode("utf-8")[:200].decode("utf-8", errors="ignore")
+        # 若截断后首位字符是 '_'（来自危险字符），再裁一次
+        return truncated.rstrip("_") or "file"
+    return cleaned
 
 
 def make_image_path(data_dir: str, message_id: str) -> str:

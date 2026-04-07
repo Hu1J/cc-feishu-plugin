@@ -193,3 +193,20 @@ def build_write_marker(tool_input_json: str) -> list[_DiffMarker]:
         return [_DiffMarker("Write", tool_input_json, format_write_card(file_path, lines))]
     chunks = [lines[i:i + MAX_CARD_LINES] for i in range(0, len(lines), MAX_CARD_LINES)]
     return [_DiffMarker("Write", tool_input_json, format_write_card(file_path, chunk)) for chunk in chunks]
+
+
+class _MemoryCardMarker:
+    """记忆工具结果卡片标记 — 触发 Feishu Interactive Card 发送。
+
+    card_type 决定 stream_callback 如何渲染卡片内容：
+    - add / update  → 参数表格（标题列置顶）
+    - delete        → 删除条目 ID 表格
+    - list / search → 实际记忆条目表格（需查库）
+    """
+    __slots__ = ("tool_name", "card_type", "entries", "tool_input")
+
+    def __init__(self, tool_name: str, card_type: str, entries: list, tool_input: str):
+        self.tool_name = tool_name      # 原始工具名，如 "mcp__memory__MemoryAddProj"
+        self.card_type = card_type      # add | update | delete | list | search
+        self.entries = entries          # list[dict] — 查库后的实际条目
+        self.tool_input = tool_input    # 原始 JSON 入参

@@ -271,6 +271,7 @@ def _start_bridge(project_path: str, timeout: float = 8.0) -> int:
         proc = subprocess.Popen(
             ["cc-feishu-bridge", "start"],
             cwd=project_path,
+            stdin=subprocess.DEVNULL,
             stdout=stdout_log,
             stderr=stderr_log,
             start_new_session=True,

@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.13] - 2026-04-07
+
+### Added
+- **Feishu Interactive Card 记忆卡片**：记忆 MCP 工具（add/update/list/search/delete）结果通过 Feishu 交互卡片展示，每种操作有专属渲染格式
+- **用户偏好内存缓存 `_prefs_cache`**：按 `(db_path, user_open_id)` 隔离，`add/update/delete` 均主动失效缓存
+- **system_prompt append 注入**：记忆指南和用户偏好通过 `--append-system-prompt` 追加到 claude_code 默认系统提示词，而非拼接在用户消息前
+- **`__PREFS_VERSION` 热更新**：偏好更新后 `updated_at` 变化使版号改变，CC 下一条消息自动获取最新偏好
+
+### Changed
+- **记忆指南触发时机**：从"遇到问题"扩展为"收到用户提问"或"开始开发前"主动检索
+- **项目记忆默认 project_path**：CC 调用时未传 `project_path` 则自动使用当前项目路径兜底
+
+### Fixed
+- **restart 偶发崩溃**：`_start_bridge` 子进程 `stdin=subprocess.DEVNULL`，避免父进程退出时文件描述符损坏导致 `Bad file descriptor`
+- **delete 卡片"无结果"**：CC 先删 DB 再渲染卡片导致查不到记录，简化为展示被删记忆 ID
+- **list/search 顶部 project_path 不一致**：为空时改用 `self._current_project_path` 兜底
+
 ## [0.3.12] - 2026-04-06
 
 ### Fixed

@@ -12,10 +12,10 @@ from cc_feishu_bridge.feishu.client import FeishuClient, IncomingMessage
 from cc_feishu_bridge.security.auth import Authenticator
 from cc_feishu_bridge.security.validator import SecurityValidator
 from cc_feishu_bridge.claude.integration import ClaudeIntegration
-from cc_feishu_bridge.claude.memory_manager import MemoryManager, MEMORY_SYSTEM_GUIDE
+from cc_feishu_bridge.claude.memory_manager import get_memory_manager, MEMORY_SYSTEM_GUIDE
 from cc_feishu_bridge.claude.session_manager import SessionManager
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
-from cc_feishu_bridge.format.edit_diff import _DiffMarker
+from cc_feishu_bridge.format.edit_diff import _DiffMarker, _MemoryCardMarker
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ class MessageHandler:
         self.formatter = formatter
         self.approved_directory = approved_directory
         self.data_dir = data_dir
-        self.memory_manager = MemoryManager()
+        self.memory_manager = get_memory_manager()
         self._queue: asyncio.Queue[IncomingMessage] | None = None
         self._queue_loop_id: int | None = None
         self._worker_task: asyncio.Task | None = None
@@ -218,11 +218,13 @@ class MessageHandler:
         if session and session.chat_id != message.chat_id:
             self.sessions.update_chat_id(message.user_open_id, message.chat_id)
 
-        memory_context = MEMORY_SYSTEM_GUIDE + self.memory_manager.inject_context(
-            user_open_id=message.user_open_id,
-            project_path=self.approved_directory,
+        project_path = session.project_path if session else self.approved_directory
+        self._current_project_path = project_path  # 供 stream_callback 使用
+        system_prompt_append = (
+            MEMORY_SYSTEM_GUIDE
+            + self.memory_manager.inject_context(user_open_id=message.user_open_id)
         )
-        await self._run_query(message, session, sdk_session_id, memory_context)
+        await self._run_query(message, session, sdk_session_id, system_prompt_append)
 
     async def _handle_command(self, message: IncomingMessage) -> HandlerResult:
         """Handle slash commands like /new, /status."""
@@ -362,7 +364,7 @@ class MessageHandler:
 
         # /memory user ...
         if scope == "user":
-            return await self._handle_memory_user(action, raw_args)
+            return await self._handle_memory_user(message.user_open_id, action, raw_args)
 
         # /memory proj ...
         if scope == "proj":
@@ -390,7 +392,139 @@ class MessageHandler:
             "关键词用逗号分隔（若有多个）",
         ])
 
-    async def _handle_memory_user(self, action: str, raw_args: str) -> HandlerResult:
+    # ── 记忆工具 MD 表格分页常量 ──────────────────────────────────────────────
+    _MEM_PAGE_SIZE = 5
+
+    def _render_memory_card(self, marker: _MemoryCardMarker) -> str:
+        """将 _MemoryCardMarker 渲染为 MD 字符串。"""
+        try:
+            args = json.loads(marker.tool_input) if marker.tool_input else {}
+        except json.JSONDecodeError:
+            args = {}
+
+        short = marker.tool_name.replace("mcp__memory__", "")
+        scope = "proj" if "Proj" in short else "user"
+        card_type = marker.card_type or ""
+
+        def _esc(s: str) -> str:
+            return s.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
+
+        def _entry_table(entries: list, show_num: bool = False) -> str:
+            if not entries:
+                return "  _无结果_"
+            lines = "|"
+            sep = "|"
+            cols = ["标题", "内容摘要", "关键词", "ID"]
+            if show_num:
+                cols = ["#"] + cols
+            for c in cols:
+                lines += f" {c} |"
+                sep += "------|"
+            lines += "\n" + sep + "\n"
+            for i, e in enumerate(entries):
+                num = str(i + 1) if show_num else ""
+                title = _esc(e.get("title", "")[:40])
+                content = _esc(e.get("content", "")[:50])
+                keywords = _esc(e.get("keywords", ""))
+                mid = f"`{e.get('id', '')}`"
+                if show_num:
+                    lines += f"| {num} | {title} | {content} | {keywords} | {mid} |\n"
+                else:
+                    lines += f"| {title} | {content} | {keywords} | {mid} |\n"
+            return lines
+
+        # ── 顶部文案 ─────────────────────────────────────────────────────
+        header = f"🧠 **{short}**"
+        if card_type == "search":
+            q = args.get("query", "")
+            header += f"  查询: 「{q}」"
+        if scope == "proj":
+            pp = args.get("project_path", "") or getattr(self, "_current_project_path", "")
+            if pp:
+                header += f"  项目: {pp.split('/')[-1] or pp}"
+        elif args.get("user_open_id"):
+            header += f"  用户: {args['user_open_id']}"
+        # add/update 的 title 已在表格中展示，顶部文案不再重复
+
+        # ── 内容体 ───────────────────────────────────────────────────────
+        if card_type in ("add", "update"):
+            # add/update → 条目表格，标题列置顶（顶部文案不含 title）
+            lines = f"{header}\n\n| 标题 | 内容摘要 | 关键词 |\n|------|----------|--------|\n"
+            for e in marker.entries:
+                title = _esc(e.get("title", "")[:60])
+                content = _esc(e.get("content", "")[:50])
+                keywords = _esc(e.get("keywords", ""))
+                mid = f"`{e.get('id', '')}`"
+                lines += f"| {title} | {content} | {keywords} |\n"
+            return lines
+
+        elif card_type in ("list", "search"):
+            label = "项目记忆" if scope == "proj" else "用户偏好"
+            total = len(marker.entries)
+            header += f"（共 {total} 条）"
+            body = _entry_table(marker.entries, show_num=True)
+            return f"{header}\n\n{body}"
+
+        elif card_type == "delete":
+            # delete — 只展示被删记忆 ID
+            deleted_id = marker.entries[0].get("id", "") if marker.entries else ""
+            return f"{header}\n\n| ID |\n|------|\n| `{deleted_id}` |\n"
+
+        # fallback: 兜底参数表
+        lines = f"{header}\n\n| 参数 | 值 |\n|------|----|\n"
+        for k, v in args.items():
+            v_str = _esc(str(v))
+            if len(v_str) > 80:
+                v_str = v_str[:80] + "…"
+            lines += f"| `{k}` | {v_str} |\n"
+        return lines
+
+    def _fmt_pref_table(self, prefs: list, total: int, page: int = 1) -> str:
+        """将用户偏好列表渲染为 MD 表格（支持分页）。"""
+        start = (page - 1) * self._MEM_PAGE_SIZE
+        page_items = prefs[start:start + self._MEM_PAGE_SIZE]
+        total_pages = (total + self._MEM_PAGE_SIZE - 1) // self._MEM_PAGE_SIZE
+
+        header = f"👤 **用户偏好**（共 {total} 条，第 {page}/{total_pages} 页）\n\n"
+        header += "| # | 标题 | 内容摘要 | 关键词 | ID |"
+        header += "\n|---|------|----------|--------|---|"
+        for i, p in enumerate(page_items, start=start + 1):
+            content_short = p.content[:60] + ("…" if len(p.content) > 60 else "")
+            # 转义所有可能破坏 MD 表格结构的字符
+            def esc(s: str) -> str:
+                return s.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
+            title_esc = esc(p.title)
+            content_esc = esc(content_short)
+            header += f"\n| {i} | {title_esc} | {content_esc} | {esc(p.keywords)} | `{p.id}` |"
+
+        nav = ""
+        if total_pages > 1:
+            nav = f"\n> 📖 第 {page}/{total_pages} 页，输入 /memory user list 翻页"
+        return header + nav
+
+    def _fmt_proj_table(self, mems: list, total: int, page: int = 1) -> str:
+        """将项目记忆列表渲染为 MD 表格（支持分页）。"""
+        start = (page - 1) * self._MEM_PAGE_SIZE
+        page_items = mems[start:start + self._MEM_PAGE_SIZE]
+        total_pages = (total + self._MEM_PAGE_SIZE - 1) // self._MEM_PAGE_SIZE
+
+        header = f"📁 **项目记忆**（共 {total} 条，第 {page}/{total_pages} 页）\n\n"
+        header += "| # | 标题 | 内容摘要 | 关键词 | ID |"
+        header += "\n|---|------|----------|--------|---|"
+        for i, m in enumerate(page_items, start=start + 1):
+            content_short = m.content[:60] + ("…" if len(m.content) > 60 else "")
+            def esc(s: str) -> str:
+                return s.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
+            title_esc = esc(m.title)
+            content_esc = esc(content_short)
+            header += f"\n| {i} | {title_esc} | {content_esc} | {esc(m.keywords)} | `{m.id}` |"
+
+        nav = ""
+        if total_pages > 1:
+            nav = f"\n> 📖 第 {page}/{total_pages} 页，输入 /memory proj list 翻页"
+        return header + nav
+
+    async def _handle_memory_user(self, user_open_id: str, action: str, raw_args: str) -> HandlerResult:
         """Handle /memory user <action>."""
         if action == "add":
             parts = raw_args.split("|")
@@ -402,7 +536,7 @@ class MessageHandler:
             keywords = parts[2].strip()
             if not title or not content or not keywords:
                 return HandlerResult(success=True, response_text="title、content、keywords 三样必填")
-            p = self.memory_manager.add_preference(title, content, keywords)
+            p = self.memory_manager.add_preference(user_open_id, title, content, keywords)
             return HandlerResult(success=True,
                                  response_text=f"✅ 用户偏好已保存（ID: {p.id}）")
 
@@ -436,13 +570,8 @@ class MessageHandler:
             prefs = self.memory_manager.get_all_preferences()
             if not prefs:
                 return HandlerResult(success=True, response_text="📭 暂无用户偏好记录")
-            lines = [f"👤 用户偏好（共 {len(prefs)} 条）\n"]
-            for p in prefs:
-                lines.append(f"**{p.title}**  (id={p.id})")
-                lines.append(f"  {p.content}")
-                lines.append(f"  关键词: {p.keywords}")
-                lines.append("")
-            return HandlerResult(success=True, response_text="\n".join(lines)[:2000])
+            return HandlerResult(success=True,
+                                 response_text=self._fmt_pref_table(prefs, len(prefs)))
 
         elif action == "search":
             if not raw_args:
@@ -451,13 +580,8 @@ class MessageHandler:
             if not results:
                 return HandlerResult(success=True,
                                      response_text=f"未找到与「{raw_args}」相关的用户偏好")
-            lines = [f"🔍 用户偏好搜索结果（共 {len(results)} 条）\n"]
-            for p in results:
-                lines.append(f"**{p.title}**  (id={p.id})")
-                lines.append(f"  {p.content}")
-                lines.append(f"  关键词: {p.keywords}")
-                lines.append("")
-            return HandlerResult(success=True, response_text="\n".join(lines)[:2000])
+            return HandlerResult(success=True,
+                                 response_text=self._fmt_pref_table(results, len(results)))
 
         else:
             return HandlerResult(success=True,
@@ -512,13 +636,8 @@ class MessageHandler:
             mems = self.memory_manager.get_project_memories(self.approved_directory)
             if not mems:
                 return HandlerResult(success=True, response_text="📭 暂无项目记忆记录")
-            lines = [f"📁 项目记忆（共 {len(mems)} 条）\n"]
-            for m in mems:
-                lines.append(f"**{m.title}**  (id={m.id})")
-                lines.append(f"  {m.content}")
-                lines.append(f"  关键词: {m.keywords}")
-                lines.append("")
-            return HandlerResult(success=True, response_text="\n".join(lines)[:2000])
+            return HandlerResult(success=True,
+                                 response_text=self._fmt_proj_table(mems, len(mems)))
 
         elif action == "search":
             if not raw_args:
@@ -529,14 +648,9 @@ class MessageHandler:
             if not results:
                 return HandlerResult(success=True,
                                      response_text=f"未找到与「{raw_args}」相关的项目记忆")
-            lines = [f"🔍 项目记忆搜索结果（共 {len(results)} 条）\n"]
-            for r in results:
-                m = r.memory
-                lines.append(f"**{m.title}**  (id={m.id})")
-                lines.append(f"  {m.content}")
-                lines.append(f"  关键词: {m.keywords}")
-                lines.append("")
-            return HandlerResult(success=True, response_text="\n".join(lines)[:2000])
+            mems = [r.memory for r in results]
+            return HandlerResult(success=True,
+                                 response_text=self._fmt_proj_table(mems, len(mems)))
 
         else:
             return HandlerResult(success=True,
@@ -580,7 +694,7 @@ class MessageHandler:
         message: IncomingMessage,
         session,
         sdk_session_id: str | None,
-        memory_context: str | None = None,
+        system_prompt_append: str | None = None,
     ) -> None:
         """Run Claude query in background, send results to Feishu on completion."""
         reaction_id = None
@@ -647,9 +761,15 @@ class MessageHandler:
             async def stream_callback(claude_msg):
                 if claude_msg.tool_name:
                     await accumulator.flush()
+                    # 记忆工具传入 memory_manager 和默认 project_path
+                    kwargs = {}
+                    if claude_msg.tool_name.startswith("mcp__memory__"):
+                        kwargs["memory_manager"] = self.memory_manager
+                        kwargs["default_project_path"] = getattr(self, "_current_project_path", "")
                     result = self.formatter.format_tool_call(
                         claude_msg.tool_name,
                         claude_msg.tool_input,
+                        **kwargs,
                     )
                     logger.info(f"[stream] tool: {claude_msg.tool_name} | input: {claude_msg.tool_input}")
 
@@ -714,6 +834,19 @@ class MessageHandler:
                                             fallback = f"🤖 **{marker.tool_name}**\n`{marker.tool_input[:500]}`"
                                         logger.warning(f"send_edit_diff_card failed, falling back to: {fallback}")
                                         await self._safe_send(message.chat_id, message.message_id, fallback, log_reply=False)
+                    elif isinstance(result, _MemoryCardMarker):
+                        # 记忆工具 → Feishu Interactive Card（按 card_type 渲染）
+                        card_md = self._render_memory_card(result)
+                        try:
+                            await self.feishu.send_interactive_reply(
+                                message.chat_id,
+                                self.formatter.format_text(card_md),
+                                message.message_id,
+                                log_reply=False,
+                            )
+                        except Exception:
+                            logger.warning(f"send_interactive_reply failed for memory tool, falling back")
+                            await self._safe_send(message.chat_id, message.message_id, result.card_md, log_reply=False)
                     else:
                         await self._safe_send(message.chat_id, message.message_id, result, log_reply=False)
                 elif claude_msg.content:
@@ -741,7 +874,7 @@ class MessageHandler:
                 session_id=sdk_session_id,
                 cwd=session.project_path if session else self.approved_directory,
                 on_stream=stream_callback,
-                memory_context=memory_context,
+                system_prompt_append=system_prompt_append,
             )
 
             # Flush any remaining buffered text
