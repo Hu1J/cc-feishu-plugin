@@ -65,6 +65,7 @@ class ClaudeIntegration:
         try:
             from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
             from cc_feishu_bridge.claude.memory_tools import get_memory_mcp_server
+            from cc_feishu_bridge.claude.feishu_file_tools import get_feishu_file_mcp_server
 
             options = ClaudeAgentOptions(
                 cwd=cwd or self.approved_directory or ".",
@@ -73,7 +74,10 @@ class ClaudeIntegration:
                 include_partial_messages=True,
                 permission_mode="bypassPermissions",
                 continue_conversation=bool(session_id),
-                mcp_servers={"memory": get_memory_mcp_server()},
+                mcp_servers={
+                    "memory": get_memory_mcp_server(),
+                    "feishu_file": get_feishu_file_mcp_server(),
+                },
             )
             # 追加记忆指南 + 用户偏好到系统提示词（preset 保留 claude_code 默认提示词）
             if system_prompt_append:
