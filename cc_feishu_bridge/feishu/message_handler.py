@@ -271,7 +271,7 @@ class MessageHandler:
 
         sdk_session_id = session.sdk_session_id if session else None
         if session and session.chat_id != message.chat_id:
-            self.sessions.update_chat_id(session_key, message.chat_id)
+            self.sessions.update_chat_id(message.user_open_id, message.chat_id)
 
         project_path = session.project_path if session else self.approved_directory
         self._current_project_path = project_path  # 供 stream_callback 使用

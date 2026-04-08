@@ -114,7 +114,8 @@ async def handle_message(message: IncomingMessage, handler: MessageHandler) -> N
     # Store raw message for memory enhancement
     session = None
     if message.user_open_id:
-        session = handler.sessions.get_active_session(message.user_open_id)
+        session_key = message.user_open_id if message.chat_type == "p2p" else message.chat_id
+        session = handler.sessions.get_active_session(session_key)
         if session:
             handler.sessions.update_session(session.session_id, update_last_message=True)
             handler.sessions.store_message(
