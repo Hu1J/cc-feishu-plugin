@@ -15,17 +15,20 @@ logger = logging.getLogger(__name__)
 class Session:
     session_id: str
     sdk_session_id: str | None
-    user_id: str
+    user_id: str              # 发送者 open_id（保留，用于 @ 回复）
     project_path: str
     created_at: datetime
     last_used: datetime
     total_cost: float
     message_count: int
-    chat_id: str | None = None   # 新增：最近活跃的飞书 chat_id
+    chat_id: str | None = None   # 最近活跃的飞书 chat_id
     last_message_at: datetime | None = None
     proactive_today_count: int = 0
     proactive_today_date: str | None = None   # YYYY-MM-DD 格式
     last_proactive_at: datetime | None = None  # 发完主动推送后，记录时间戳，用于冷却期判断
+    # 新增
+    chat_type: str = "p2p"   # "p2p" 或 "group"
+    session_key: str = ""    # p2p=user_open_id, group=chat_id
 
 
 class SessionManager:
@@ -84,10 +87,28 @@ class SessionManager:
                 conn.execute("ALTER TABLE sessions ADD COLUMN last_proactive_at TIMESTAMP")
             except sqlite3.OperationalError:
                 pass
+            # Migrate: add chat_type column if it doesn't exist
+            try:
+                conn.execute("ALTER TABLE sessions ADD COLUMN chat_type TEXT DEFAULT 'p2p'")
+            except sqlite3.OperationalError:
+                pass
+            # Migrate: add session_key column if it doesn't exist
+            try:
+                conn.execute("ALTER TABLE sessions ADD COLUMN session_key TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            # Backfill session_key for existing rows (session_key = user_id for p2p sessions)
+            try:
+                conn.execute("UPDATE sessions SET session_key = user_id, chat_type = 'p2p' WHERE session_key = ''")
+            except sqlite3.OperationalError:
+                pass
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_user_last
                 ON sessions(user_id, last_used DESC)
             """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_session_key ON sessions(session_key)"
+            )
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,11 +130,31 @@ class SessionManager:
                 "CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at)"
             )
 
-    def create_session(self, user_id: str, project_path: str, sdk_session_id: str | None = None) -> Session:
-        """Create a new session for a user."""
+    def create_session(
+        self,
+        user_id: str,
+        project_path: str,
+        sdk_session_id: str | None = None,
+        chat_type: str = "p2p",
+        chat_id: str | None = None,
+    ) -> Session:
+        """Create a new session for a user.
+
+        Args:
+            user_id: The sender's Feishu open_id.
+            project_path: Path to the project directory.
+            sdk_session_id: Optional SDK session ID for continue_session.
+            chat_type: "p2p" for private chat, "group" for group chat.
+            chat_id: The Feishu chat_id (required for group sessions).
+        """
         now = datetime.utcnow()
+        # session_key = chat_id if group else user_id
+        if chat_type == "group" and chat_id:
+            session_key = chat_id
+        else:
+            session_key = user_id
         session = Session(
-            session_id=f"session_{now.strftime('%Y%m%d%H%M%S')}",
+            session_id=f"session_{now.strftime('%Y%m%d%H%M%S%f')}",
             sdk_session_id=sdk_session_id,
             user_id=user_id,
             project_path=project_path,
@@ -121,36 +162,42 @@ class SessionManager:
             last_used=now,
             total_cost=0.0,
             message_count=0,
+            chat_id=chat_id,
+            chat_type=chat_type,
+            session_key=session_key,
         )
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """INSERT INTO sessions
-                   (session_id, sdk_session_id, user_id, chat_id, project_path, created_at, last_used, total_cost, message_count)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (session_id, sdk_session_id, user_id, chat_id, project_path, created_at,
+                    last_used, total_cost, message_count, chat_type, session_key)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session.session_id,
                     session.sdk_session_id,
                     session.user_id,
-                    "",   # chat_id 初始为空字符串
+                    session.chat_id or "",
                     session.project_path,
                     session.created_at.isoformat(),
                     session.last_used.isoformat(),
                     session.total_cost,
                     session.message_count,
+                    session.chat_type,
+                    session.session_key,
                 ),
             )
         return session
 
-    def get_active_session(self, user_id: str) -> Optional[Session]:
-        """Get the most recent session for a user."""
+    def get_active_session(self, session_key: str) -> Optional[Session]:
+        """Get the most recent session for a session_key (user_open_id for p2p, chat_id for group)."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """SELECT * FROM sessions
-                   WHERE user_id = ?
+                   WHERE session_key = ?
                    ORDER BY last_used DESC
                    LIMIT 1""",
-                (user_id,),
+                (session_key,),
             ).fetchone()
         if row:
             return Session(
@@ -167,6 +214,8 @@ class SessionManager:
                 proactive_today_count=row["proactive_today_count"],
                 proactive_today_date=row["proactive_today_date"],
                 last_proactive_at=datetime.fromisoformat(row["last_proactive_at"]) if row["last_proactive_at"] else None,
+                chat_type=row["chat_type"],
+                session_key=row["session_key"],
             )
         return None
 
@@ -238,6 +287,8 @@ class SessionManager:
                     proactive_today_count=row["proactive_today_count"],
                     proactive_today_date=row["proactive_today_date"],
                     last_proactive_at=datetime.fromisoformat(row["last_proactive_at"]) if row["last_proactive_at"] else None,
+                    chat_type=row["chat_type"],
+                    session_key=row["session_key"],
                 )
             return None
 
@@ -280,6 +331,8 @@ class SessionManager:
                 proactive_today_count=row["proactive_today_count"],
                 proactive_today_date=row["proactive_today_date"],
                 last_proactive_at=datetime.fromisoformat(row["last_proactive_at"]) if row["last_proactive_at"] else None,
+                chat_type=row["chat_type"],
+                session_key=row["session_key"],
             )
             for row in rows
         ]
