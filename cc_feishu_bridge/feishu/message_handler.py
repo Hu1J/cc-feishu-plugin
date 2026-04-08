@@ -1055,12 +1055,12 @@ class MessageHandler:
                     tag = STATUS_COLOR.get(idx_char, '<font color="orangered">?</font>')
                     card_lines.append(f"{tag}   {line[3:]}")
         else:
-            card_lines.append("<font color=\"green\">✓</font> 工作区干净，无待提交变更")
+            card_lines.append("✅ 工作区干净，无待提交变更")
 
         # 最近提交始终显示
         card_lines.extend([
             "",
-            "**最近提交**",
+            "📋 **最近提交**",
             "",
             "| 时间 | Hash | 描述 |",
             "|------|------|------|",
