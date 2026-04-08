@@ -161,6 +161,54 @@ class FeishuClient:
             raise RuntimeError(f"Failed to send message: {response.msg}")
         return response.data.message_id
 
+    async def send_text_by_open_id(
+        self,
+        user_open_id: str,
+        text: str,
+        reply_to_message_id: str | None = None,
+    ) -> str:
+        """Send a text message to a specific user by open_id (for group @mention replies).
+
+        In group chats, replying to a user mention requires sending to their open_id
+        rather than the group chat_id. Feishu displays this as an @mention to the user.
+        """
+        import json
+        import lark_oapi as lark
+        client = self._get_client()
+
+        if reply_to_message_id:
+            request = (
+                lark.im.v1.ReplyMessageRequest.builder()
+                .message_id(reply_to_message_id)
+                .request_body(
+                    lark.im.v1.ReplyMessageRequestBody.builder()
+                    .receive_id(user_open_id)
+                    .content(json.dumps({"text": text}))
+                    .msg_type("text")
+                    .build()
+                )
+                .build()
+            )
+            response = await asyncio.to_thread(client.im.v1.message.reply, request)
+        else:
+            request = (
+                lark.im.v1.CreateMessageRequest.builder()
+                .receive_id_type("open_id")
+                .request_body(
+                    lark.im.v1.CreateMessageRequestBody.builder()
+                    .receive_id(user_open_id)
+                    .content(json.dumps({"text": text}))
+                    .msg_type("text")
+                    .build()
+                )
+                .build()
+            )
+            response = await asyncio.to_thread(client.im.v1.message.create, request)
+
+        if not response.success():
+            raise RuntimeError(f"Failed to send message to open_id: {response.msg}")
+        return response.data.message_id
+
     async def get_message(self, message_id: str) -> dict | None:
         """Fetch a message by ID. Returns a plain dict or None on failure.
 
