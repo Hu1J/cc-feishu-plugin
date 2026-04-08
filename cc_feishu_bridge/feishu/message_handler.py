@@ -11,10 +11,12 @@ from dataclasses import dataclass
 from cc_feishu_bridge.feishu.client import FeishuClient, IncomingMessage
 from cc_feishu_bridge.security.auth import Authenticator
 from cc_feishu_bridge.security.validator import SecurityValidator
+from cc_feishu_bridge.claude.chat_lock import ChatLockManager
 from cc_feishu_bridge.claude.integration import ClaudeIntegration
 from cc_feishu_bridge.claude.memory_manager import get_memory_manager, MEMORY_SYSTEM_GUIDE
 from cc_feishu_bridge.claude.feishu_file_tools import FEISHU_FILE_GUIDE
 from cc_feishu_bridge.claude.session_manager import SessionManager
+from cc_feishu_bridge.feishu.should_respond import should_respond
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 from cc_feishu_bridge.format.edit_diff import _DiffMarker, _MemoryCardMarker
 
@@ -105,6 +107,7 @@ class MessageHandler:
         formatter: ReplyFormatter,
         approved_directory: str,
         data_dir: str = "",
+        config: "Config | None" = None,
     ):
         self.feishu = feishu_client
         self.auth = authenticator
@@ -114,12 +117,18 @@ class MessageHandler:
         self.formatter = formatter
         self.approved_directory = approved_directory
         self.data_dir = data_dir
+        self.config = config
+        self.chat_lock = ChatLockManager(
+            max_concurrent=getattr(config, "max_concurrent_chats", 10) if config else 10
+        )
         self.memory_manager = get_memory_manager()
         self._queue: asyncio.Queue[IncomingMessage] | None = None
         self._queue_loop_id: int | None = None
         self._worker_task: asyncio.Task | None = None
         self._is_processing: bool = False  # True while worker is running or about to run
         self._current_message_id: str = ""
+        self._current_session_key: str | None = None
+        self._active_integration: ClaudeIntegration | None = None
 
     def _get_queue(self) -> asyncio.Queue[IncomingMessage]:
         """Lazily create (or recreate) the queue in the current event loop.
@@ -194,7 +203,7 @@ class MessageHandler:
             self._is_processing = False
 
     async def _process_message(self, message: IncomingMessage) -> None:
-        """处理单条消息：鉴权 → 媒体预处理 → 引用检测 → 查询。"""
+        """处理单条消息：鉴权 → should_respond → session_key 路由 → ChatLock → 查询。"""
         auth_result = self.auth.authenticate(message.user_open_id)
         if not auth_result.authorized:
             logger.info(f"Ignoring message from unauthorized user: {message.user_open_id}")
@@ -214,10 +223,50 @@ class MessageHandler:
         #         await self._safe_send(message.chat_id, message.message_id, f"⚠️ {err}")
         #         return
 
-        session = self.sessions.get_active_session(message.user_open_id)
+        # should_respond check
+        bot_open_id = ""  # TODO: fetch from feishu_client after init
+        if self.config and not should_respond(message, self.config, bot_open_id):
+            logger.debug(f"Ignoring message: not @mentioned or chat_mode=mention")
+            return
+
+        # session_key 决定
+        session_key = message.user_open_id if message.chat_type == "p2p" else message.chat_id
+
+        # ChatLock 获取
+        lock_result = await self.chat_lock.acquire(session_key)
+        if not lock_result.acquired:
+            await self._safe_send(
+                message.chat_id,
+                message.message_id,
+                "当前会话繁忙，请稍后再试 🛑",
+                message=message,
+            )
+            return
+
+        try:
+            await self._process_message_with_session(message, session_key)
+        finally:
+            await self.chat_lock.release(session_key)
+
+    async def _process_message_with_session(self, message: IncomingMessage, session_key: str) -> None:
+        """使用 session_key 获取/创建 session，然后调用 _run_query。"""
+        session = self.sessions.get_active_session(session_key)
+        if not session:
+            project_path = (
+                self.config.resolve_project_path(message.chat_id, message.user_open_id)
+                if self.config
+                else self.approved_directory
+            )
+            session = self.sessions.create_session(
+                user_id=message.user_open_id,
+                project_path=project_path,
+                chat_type=message.chat_type,
+                chat_id=message.chat_id if message.chat_type == "group" else None,
+            )
+
         sdk_session_id = session.sdk_session_id if session else None
         if session and session.chat_id != message.chat_id:
-            self.sessions.update_chat_id(message.user_open_id, message.chat_id)
+            self.sessions.update_chat_id(session_key, message.chat_id)
 
         project_path = session.project_path if session else self.approved_directory
         self._current_project_path = project_path  # 供 stream_callback 使用
@@ -226,7 +275,7 @@ class MessageHandler:
             + FEISHU_FILE_GUIDE
             + self.memory_manager.inject_context(user_open_id=message.user_open_id)
         )
-        await self._run_query(message, session, sdk_session_id, system_prompt_append)
+        await self._run_query(message, session, sdk_session_id, system_prompt_append, session_key)
 
     async def _handle_command(self, message: IncomingMessage) -> HandlerResult:
         """Handle slash commands like /new, /status."""
@@ -697,6 +746,7 @@ class MessageHandler:
         session,
         sdk_session_id: str | None,
         system_prompt_append: str | None = None,
+        session_key: str | None = None,
     ) -> None:
         """Run Claude query in background, send results to Feishu on completion."""
         reaction_id = None
@@ -871,7 +921,10 @@ class MessageHandler:
             else:
                 # Text messages: prepend prefix to actual text content
                 full_prompt = (prefix + message.content).strip()
-            response, new_session_id, cost = await self.claude.query(
+            # Get integration from pool (if claude is a pool) or use claude directly
+            integration = self.claude.get(session_key) if hasattr(self.claude, 'get') and session_key else self.claude
+            self._active_integration = integration
+            response, new_session_id, cost = await integration.query(
                 prompt=full_prompt,
                 session_id=sdk_session_id,
                 cwd=session.project_path if session else self.approved_directory,
@@ -921,7 +974,8 @@ class MessageHandler:
         if not self._is_processing:
             await self._safe_send(message.chat_id, message.message_id, "当前没有正在运行的查询。")
             return HandlerResult(success=True)
-        await self.claude.interrupt_current()
+        if self._active_integration:
+            await self._active_integration.interrupt_current()
         self._worker_task.cancel()
         self._worker_task = None
         await self._safe_send(message.chat_id, message.message_id, "🛑 已发送停止信号，Claude 将中断当前任务。")
@@ -1009,14 +1063,26 @@ class MessageHandler:
 
         return HandlerResult(success=True)
 
-    async def _safe_send(self, chat_id: str, reply_to_message_id: str, text: str, log_reply: bool = True):
+    async def _safe_send(self, chat_id: str, reply_to_message_id: str, text: str, log_reply: bool = True, message: IncomingMessage | None = None):
         """Send a markdown message as a threaded Feishu post/card, ignoring errors.
 
         Uses Interactive Card for content with fenced code blocks or tables,
         falls back to rich text post for plain markdown.
+        For group chats with a message object, uses send_text_by_open_id to @mention the sender.
         """
+        # 群聊时，使用 open_id 类型回复（@提问者）
+        if message and message.chat_type == "group":
+            try:
+                await self.feishu.send_text_by_open_id(
+                    user_open_id=message.user_open_id,
+                    text=text,
+                    reply_to_message_id=reply_to_message_id,
+                )
+                return
+            except Exception as e:
+                logger.warning(f"send_text_by_open_id failed, falling back: {e}")
+        # P2P 或降级路径：原有 reply 逻辑
         try:
-            # Optimize and decide format
             formatted = self.formatter.format_text(text)
             if not formatted.strip():
                 return

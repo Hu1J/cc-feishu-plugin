@@ -28,6 +28,7 @@ from cc_feishu_bridge.feishu.error_notifier import setup as setup_error_notifier
 from cc_feishu_bridge.security.auth import Authenticator
 from cc_feishu_bridge.security.validator import SecurityValidator
 from cc_feishu_bridge.claude.integration import ClaudeIntegration
+from cc_feishu_bridge.claude.integration_pool import ClaudeIntegrationPool
 from cc_feishu_bridge.claude.session_manager import SessionManager
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 from cc_feishu_bridge.proactive_scheduler import ProactiveScheduler
@@ -82,7 +83,8 @@ def create_handler(config, data_dir: str) -> MessageHandler:
     setup_error_notifier(feishu)
     authenticator = Authenticator(allowed_users=config.auth.allowed_users)
     validator = SecurityValidator(approved_directory=config.claude.approved_directory)
-    claude = ClaudeIntegration(
+    claude_pool = ClaudeIntegrationPool(
+        max_size=getattr(config, "max_concurrent_chats", 10),
         cli_path=config.claude.cli_path,
         max_turns=config.claude.max_turns,
         approved_directory=config.claude.approved_directory,
@@ -95,11 +97,12 @@ def create_handler(config, data_dir: str) -> MessageHandler:
         feishu_client=feishu,
         authenticator=authenticator,
         validator=validator,
-        claude=claude,
+        claude=claude_pool,
         session_manager=session_manager,
         formatter=formatter,
         approved_directory=config.claude.approved_directory,
         data_dir=data_dir,
+        config=config,
     )
     return handler
 

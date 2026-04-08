@@ -52,3 +52,7 @@ class ClaudeIntegrationPool:
     @property
     def active_keys(self) -> list[str]:
         return list(self._pool.keys())
+
+    def get_integration(self, session_key: str) -> "ClaudeIntegration":
+        """Return the integration for session_key (must be called from get() context or after)."""
+        return self._pool.get(session_key)
