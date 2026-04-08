@@ -17,7 +17,7 @@ from cc_feishu_bridge.claude.integration_pool import ClaudeIntegrationPool
 from cc_feishu_bridge.claude.memory_manager import get_memory_manager, MEMORY_SYSTEM_GUIDE
 from cc_feishu_bridge.claude.feishu_file_tools import FEISHU_FILE_GUIDE
 from cc_feishu_bridge.claude.session_manager import SessionManager
-from cc_feishu_bridge.feishu.should_respond import should_respond
+from cc_feishu_bridge.feishu.should_respond import should_respond, _is_bot_mentioned
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 from cc_feishu_bridge.format.edit_diff import _DiffMarker, _MemoryCardMarker
 
@@ -275,10 +275,22 @@ class MessageHandler:
 
         project_path = session.project_path if session else self.approved_directory
         self._current_project_path = project_path  # 供 stream_callback 使用
+        # 只有在用户明确与 CC 互动时才注入偏好：
+        # - P2P 私聊：始终注入
+        # - 群聊被 @mention：注入
+        # - 群聊 open 模式但未被 mention：跳过（回复对象不明确）
+        should_inject = (
+            message.chat_type == "p2p"
+            or _is_bot_mentioned(message.raw_content, self._bot_open_id)
+        )
+        user_pref_context = (
+            self.memory_manager.inject_context(user_open_id=message.user_open_id)
+            if should_inject else ""
+        )
         system_prompt_append = (
             MEMORY_SYSTEM_GUIDE
             + FEISHU_FILE_GUIDE
-            + self.memory_manager.inject_context(user_open_id=message.user_open_id)
+            + user_pref_context
         )
         await self._run_query(message, session, sdk_session_id, system_prompt_append, session_key)
 
