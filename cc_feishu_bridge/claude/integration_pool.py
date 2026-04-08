@@ -28,10 +28,15 @@ class ClaudeIntegrationPool:
         async with self._lock:
             if session_key not in self._pool:
                 self._ensure_capacity_unlocked()
+                # Set _last_used BEFORE adding to pool — otherwise the new entry has
+                # _last_used=0 (default) and will be incorrectly selected as the
+                # "oldest" entry for LRU eviction on the very next get() call.
+                self._last_used[session_key] = time.monotonic()
                 integration = ClaudeIntegration(**self._integration_kwargs)
                 self._pool[session_key] = integration
                 logger.info(f"Created new Integration for session_key={session_key}")
-            self._last_used[session_key] = time.monotonic()
+            else:
+                self._last_used[session_key] = time.monotonic()
             return self._pool[session_key]
 
     def _ensure_capacity_unlocked(self) -> None:
@@ -46,7 +51,7 @@ class ClaudeIntegrationPool:
             return  # unlimited
         if len(self._pool) < self._max_size:
             return
-        oldest_key = min(self._last_used, key=self._last_used.get)
+        oldest_key = min(self._last_used, key=lambda k: self._last_used.get(k, float("inf")))
         del self._pool[oldest_key]
         del self._last_used[oldest_key]
         logger.info(f"Pool full — evicted session_key={oldest_key}")

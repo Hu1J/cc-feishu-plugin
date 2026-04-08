@@ -34,6 +34,10 @@ def _is_bot_mentioned(raw_content: str, bot_open_id: str) -> bool:
     """Parse raw_content JSON and check if bot_open_id appears in mentions."""
     if not raw_content:
         return False
+    # Guard against maliciously large payloads — Feishu mentions are a few bytes
+    if len(raw_content) > 100_000:  # 100 KB hard limit
+        logger.warning(f"raw_content exceeds safe size limit ({len(raw_content)} bytes)")
+        return False
     try:
         content = json.loads(raw_content)
     except Exception:

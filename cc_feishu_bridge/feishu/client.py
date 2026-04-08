@@ -145,7 +145,7 @@ class FeishuClient:
             response = await asyncio.to_thread(client.im.v1.bot_info.get, request)
             if response.success():
                 return response.data.bot.open_id or ""
-        except Exception:
+        except Exception as e:
             logger.warning(f"get_bot_open_id() failed: {e}")
         return ""
 
