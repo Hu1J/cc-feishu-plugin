@@ -45,14 +45,47 @@ class ProactiveConfig:
 
 
 @dataclass
+class ChatOverrideConfig:
+    chat_mode: str = "mention"   # "mention" 或 "open"
+    project_path: str = ""       # 空字符串表示使用全局 claude.approved_directory
+    max_turns: int = 0           # 0 表示使用全局 claude.max_turns
+
+
+@dataclass
+class ChatModesConfig:
+    default: str = "mention"     # 全局默认 chat_mode
+
+
+@dataclass
 class Config:
     feishu: FeishuConfig
     auth: AuthConfig
     claude: ClaudeConfig
     storage: StorageConfig
     proactive: ProactiveConfig = field(default_factory=ProactiveConfig)
+    chat_modes: ChatModesConfig = field(default_factory=ChatModesConfig)
+    chat_overrides: dict[str, ChatOverrideConfig] = field(default_factory=dict)
+    user_overrides: dict[str, ChatOverrideConfig] = field(default_factory=dict)
     data_dir: str = ""
     bypass_accepted: bool = False
+
+    def get_chat_mode(self, chat_id: str) -> str:
+        """Query chat_mode for a given chat_id. Priority: chat_overrides > global default."""
+        if chat_id in self.chat_overrides:
+            return self.chat_overrides[chat_id].chat_mode
+        return self.chat_modes.default
+
+    def resolve_project_path(self, chat_id: str, user_open_id: str) -> str:
+        """Query project_path for a given chat/user. Priority: chat_overrides > user_overrides > global claude.approved_directory."""
+        if chat_id in self.chat_overrides:
+            override = self.chat_overrides[chat_id]
+            if override.project_path:
+                return override.project_path
+        if user_open_id in self.user_overrides:
+            override = self.user_overrides[user_open_id]
+            if override.project_path:
+                return override.project_path
+        return self.claude.approved_directory
 
 
 def _upgrade_config(path: str) -> None:
@@ -92,12 +125,34 @@ def load_config(path: str, data_dir: str = "") -> Config:
         raw = yaml.safe_load(f)
 
     proactive = ProactiveConfig(**raw.get("proactive", {}))
+
+    chat_modes_raw = raw.get("chat_modes", {})
+    chat_modes = ChatModesConfig(default=chat_modes_raw.get("default", "mention"))
+
+    chat_overrides = {}
+    for chat_id, cfg in raw.get("chat_overrides", {}).items():
+        chat_overrides[chat_id] = ChatOverrideConfig(
+            chat_mode=cfg.get("chat_mode", "mention"),
+            project_path=cfg.get("project_path", ""),
+            max_turns=cfg.get("max_turns", 0),
+        )
+
+    user_overrides = {}
+    for user_id, cfg in raw.get("user_overrides", {}).items():
+        user_overrides[user_id] = ChatOverrideConfig(
+            project_path=cfg.get("project_path", ""),
+            max_turns=cfg.get("max_turns", 0),
+        )
+
     return Config(
         feishu=FeishuConfig(**raw.get("feishu", {})),
         auth=AuthConfig(**raw.get("auth", {})),
         claude=ClaudeConfig(**raw.get("claude", {})),
         storage=StorageConfig(**raw.get("storage", {})),
         proactive=proactive,
+        chat_modes=chat_modes,
+        chat_overrides=chat_overrides,
+        user_overrides=user_overrides,
         data_dir=data_dir,
         bypass_accepted=raw.get("bypass_accepted", False),
     )
