@@ -97,12 +97,14 @@ class FeishuWSClient:
         bot_name: str = "Claude",
         domain: str = "feishu",
         on_message: MessageCallback | None = None,
+        config_path: str | None = None,
     ):
         self.app_id = app_id
         self.app_secret = app_secret
         self.bot_name = bot_name
         self.domain = domain
         self._on_message = on_message
+        self._config_path = config_path
         self._ws_client = None
         self._handler = None
 
@@ -138,6 +140,17 @@ class FeishuWSClient:
                     except Exception:
                         pass
 
+                # Build raw_content that includes mentions (not just message.content)
+                raw_content_obj = json.loads(content_str) if content_str.startswith("{") else {"text": content_str}
+                mentions = getattr(message, "mentions", None)
+                if mentions:
+                    raw_content_obj["mentions"] = [
+                        {"open_id": getattr(m, "id", None) and getattr(m.id, "open_id", None), "name": getattr(m, "name", None)}
+                        for m in mentions
+                        if hasattr(m, "id") and m.id
+                    ]
+                content_str = json.dumps(raw_content_obj, ensure_ascii=False)
+
                 logger.debug(
                     f"Raw message — type={msg_type!r}, message_id={getattr(message, 'message_id', '')!r}, "
                     f"parent_id={getattr(message, 'parent_id', '')!r}, root_id={getattr(message, 'root_id', '')!r}, "
@@ -150,7 +163,16 @@ class FeishuWSClient:
                     user_open_id = getattr(sender_id, "open_id", "")
 
                 # 解析 chat_type（p2p 或 group）
-                chat_type = getattr(event_data, "chat_type", "p2p") or "p2p"
+                chat_type = getattr(message, "chat_type", "p2p") or "p2p"
+
+                # 群聊消息来了就自动注册（如果还没注册过）
+                chat_id = getattr(message, "chat_id", "")
+                if chat_type == "group" and chat_id and self._config_path:
+                    try:
+                        from cc_feishu_bridge.config import auto_register_group_chat
+                        auto_register_group_chat(self._config_path, chat_id)
+                    except Exception as e:
+                        logger.warning(f"Failed to auto-register group chat {chat_id}: {e}")
 
                 incoming = IncomingMessage(
                     message_id=getattr(message, "message_id", ""),
@@ -186,6 +208,26 @@ class FeishuWSClient:
 
         builder.register_p2_im_message_reaction_created_v1(noop_handler)
         builder.register_p2_im_message_reaction_deleted_v1(noop_handler)
+
+        # Auto-register group chats when bot is added to them
+        if self._config_path:
+            from cc_feishu_bridge.config import auto_register_group_chat
+
+            def bot_added_handler(event):
+                logger.info(f"[bot_added_handler] received event: {event}")
+                try:
+                    event_data = getattr(event, "event", None)
+                    logger.info(f"[bot_added_handler] event_data: {event_data}")
+                    if event_data is None:
+                        return
+                    chat_id = getattr(event_data, "chat_id", None)
+                    logger.info(f"[bot_added_handler] chat_id: {chat_id}")
+                    if chat_id:
+                        auto_register_group_chat(self._config_path, chat_id)
+                except Exception as e:
+                    logger.warning(f"Failed to auto-register group chat: {e}")
+
+            builder.register_p2_im_chat_member_bot_added_v1(bot_added_handler)
 
         self._handler = builder.build()
         return self._handler

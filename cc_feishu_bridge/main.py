@@ -256,6 +256,7 @@ def start_bridge(config_path: str, data_dir: str) -> None:
         bot_name=config.feishu.bot_name,
         domain=config.feishu.domain,
         on_message=lambda msg: handle_message(msg, handler),
+        config_path=config_path,
     )
 
     # Write PID file for process management

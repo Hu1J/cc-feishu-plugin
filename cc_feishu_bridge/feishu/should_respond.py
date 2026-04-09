@@ -31,7 +31,11 @@ def should_respond(message: IncomingMessage, config: Config, bot_open_id: str) -
 
 
 def _is_bot_mentioned(raw_content: str, bot_open_id: str) -> bool:
-    """Parse raw_content JSON and check if bot_open_id appears in mentions."""
+    """Parse raw_content JSON and check if bot_open_id appears in mentions.
+
+    If bot_open_id is unknown (empty), return True if any mention exists
+    in the message — user is clearly trying to talk to the bot.
+    """
     if not raw_content:
         return False
     # Guard against maliciously large payloads — Feishu mentions are a few bytes
@@ -46,6 +50,10 @@ def _is_bot_mentioned(raw_content: str, bot_open_id: str) -> bool:
     mentions = content.get("mentions", [])
     if not isinstance(mentions, list):
         return False
+
+    # If bot_open_id is unknown, any mention means the bot was called
+    if not bot_open_id:
+        return len(mentions) > 0
 
     for mention in mentions:
         if isinstance(mention, dict) and mention.get("open_id") == bot_open_id:

@@ -139,12 +139,25 @@ class FeishuClient:
     async def get_bot_open_id(self) -> str:
         """Get this bot's open_id from the Bot Info API."""
         import lark_oapi as lark
+        import json as json_module
+        from lark_oapi.core.model import BaseRequest
+
         client = self._get_client()
-        request = lark.im.v1.GetBotInfoRequest.builder().build()
+
+        # lark-oapi 1.5.x removed GetBotInfoRequest; use a raw BaseRequest instead
+        class BotInfoRequest(BaseRequest):
+            def __init__(inner_self):
+                super().__init__()
+                inner_self.http_method = lark.HttpMethod.GET
+                inner_self.uri = "/open-apis/im/v1/bot_info"
+                inner_self.token_types = {lark.AccessTokenType.TENANT}
+
+        request = BotInfoRequest()
         try:
-            response = await asyncio.to_thread(client.im.v1.bot_info.get, request)
-            if response.success():
-                return response.data.bot.open_id or ""
+            response = await asyncio.to_thread(client.request, request)
+            if response.code == 0 and response.raw and response.raw.content:
+                data = json_module.loads(response.raw.content.decode("utf-8"))
+                return data.get("data", {}).get("bot", {}).get("open_id", "")
         except Exception as e:
             logger.warning(f"get_bot_open_id() failed: {e}")
         return ""

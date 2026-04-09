@@ -1,11 +1,14 @@
 """Configuration loading and validation."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -89,7 +92,7 @@ class Config:
 
 
 def _upgrade_config(path: str) -> None:
-    """Auto-upgrade config.yaml: add proactive section if missing, remove stale server section."""
+    """Auto-upgrade config.yaml: add missing sections, remove stale sections."""
     with open(path) as f:
         raw = yaml.safe_load(f)
 
@@ -108,6 +111,13 @@ def _upgrade_config(path: str) -> None:
         }
         changed = True
 
+    # Add chat_modes section if missing (group chat mode config)
+    if "chat_modes" not in raw:
+        raw["chat_modes"] = {
+            "default": "mention",
+        }
+        changed = True
+
     # Remove stale server section (deprecated in v0.2.3)
     if "server" in raw:
         del raw["server"]
@@ -116,6 +126,32 @@ def _upgrade_config(path: str) -> None:
     if changed:
         with open(path, "w") as f:
             yaml.dump(raw, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+
+def auto_register_group_chat(config_path: str, chat_id: str) -> bool:
+    """Auto-register a group chat in chat_overrides if not already registered.
+
+    Returns True if the chat was newly registered, False if it was already present.
+    """
+    with open(config_path) as f:
+        raw = yaml.safe_load(f)
+
+    chat_overrides = raw.get("chat_overrides", {})
+    if chat_id in chat_overrides:
+        return False
+
+    # New group — register it with default mention mode
+    if "chat_overrides" not in raw:
+        raw["chat_overrides"] = {}
+    raw["chat_overrides"][chat_id] = {
+        "chat_mode": "mention",
+    }
+
+    with open(config_path, "w") as f:
+        yaml.dump(raw, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+    logger.info(f"Auto-registered group chat {chat_id} in chat_overrides (mention mode).")
+    return True
 
 
 def load_config(path: str, data_dir: str = "") -> Config:

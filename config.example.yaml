@@ -12,6 +12,16 @@ claude:
   max_turns: 50
   approved_directory: /Users/you/projects
 
+# 群聊响应模式配置
+chat_modes:
+  default: "mention"   # 全局默认: "mention"(仅@才回复) 或 "open"(看到所有消息)
+
+# 指定群聊的覆盖配置（优先级高于全局 default）
+# chat_overrides:
+#   "oc_xxxx群IDxxxx":
+#     chat_mode: "open"   # 让这个群走 open 模式
+#     project_path: /custom/path   # 可选: 这个群专属的项目目录
+
 proactive:
   enabled: true           # 主动推送功能开关
   time_window_start: "08:00"              # 可推送时间窗口开始（本地时间 HH:MM）
