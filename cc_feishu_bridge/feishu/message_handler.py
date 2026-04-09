@@ -28,20 +28,55 @@ logger = logging.getLogger(__name__)
 # NOT a path: paths contain slashes later (e.g. /Users/x/...)
 _COMMAND_RE = re.compile(r"^/[a-zA-Z][a-zA-Z0-9_-]*(?:\s.*)?$")
 
-# Match a mention prefix like "@机器人 " or "<at>...</at> " at the start of text
+# Match any @mention prefix at the start of text: "@name " or "<at>...</at> "
+# The bot name is not fixed, so we strip any @mention pattern generically
 _MENTION_RE = re.compile(r"^(?:@\S+\s|<at>.*?</at>\s)+")
 
 
-def _is_command(text: str) -> bool:
+def _is_command(text: str, raw_content: str = "", bot_open_id: str = "") -> bool:
     """Return True if text looks like a slash command, not a Unix path.
 
-    Strips mention prefixes (e.g. "@bot ") before checking so that
-    "@机器人 /restart" is recognized as the /restart command.
+    For group chat messages with a bot mention (e.g. "@机器人 /restart"), strips
+    the mention prefix before checking so the command is recognized.
+
+    For text-only commands (no mention), checks the text directly.
     """
     if not text:
         return False
+
+    # Try stripping @mention prefix from the start of the text
     stripped = _MENTION_RE.sub("", text).strip()
-    return bool(_COMMAND_RE.match(stripped))
+    if _COMMAND_RE.match(stripped):
+        return True
+
+    # Also handle the case where raw_content JSON contains mentions list
+    # (for more reliable mention detection than text parsing)
+    if raw_content and bot_open_id:
+        try:
+            import json
+            if len(raw_content) > 100_000:
+                return False
+            content = json.loads(raw_content)
+            mentions = content.get("mentions", [])
+            if isinstance(mentions, list):
+                for m in mentions:
+                    if isinstance(m, dict) and m.get("open_id") == bot_open_id:
+                        # Bot was mentioned — strip mention and re-check for command
+                        mention_str = m.get("name", "")
+                        if mention_str:
+                            # Try stripping by the mention name: "@BotName " at start
+                            name_pattern = re.compile(r"^@" + re.escape(mention_str) + r"\s+")
+                            stripped2 = name_pattern.sub("", text).strip()
+                            if _COMMAND_RE.match(stripped2):
+                                return True
+                        # Also try generic mention strip
+                        stripped2 = _MENTION_RE.sub("", text).strip()
+                        if _COMMAND_RE.match(stripped2):
+                            return True
+        except Exception:
+            pass
+
+    return False
 
 
 @dataclass
@@ -167,7 +202,7 @@ class MessageHandler:
         """
         # Commands are handled immediately — do not queue
         # Strip mention prefix so "@机器人 /restart" is recognized as a command
-        if _is_command(message.content):
+        if _is_command(message.content, message.raw_content, self._bot_open_id):
             # Authenticate first
             auth_result = self.auth.authenticate(message.user_open_id)
             if not auth_result.authorized:
