@@ -28,10 +28,20 @@ logger = logging.getLogger(__name__)
 # NOT a path: paths contain slashes later (e.g. /Users/x/...)
 _COMMAND_RE = re.compile(r"^/[a-zA-Z][a-zA-Z0-9_-]*(?:\s.*)?$")
 
+# Match a mention prefix like "@机器人 " or "<at>...</at> " at the start of text
+_MENTION_RE = re.compile(r"^(?:@\S+\s|<at>.*?</at>\s)+")
+
 
 def _is_command(text: str) -> bool:
-    """Return True if text looks like a slash command, not a Unix path."""
-    return bool(_COMMAND_RE.match(text))
+    """Return True if text looks like a slash command, not a Unix path.
+
+    Strips mention prefixes (e.g. "@bot ") before checking so that
+    "@机器人 /restart" is recognized as the /restart command.
+    """
+    if not text:
+        return False
+    stripped = _MENTION_RE.sub("", text).strip()
+    return bool(_COMMAND_RE.match(stripped))
 
 
 @dataclass
@@ -156,7 +166,8 @@ class MessageHandler:
         注意：所有命令（/开头）都不入队，直接处理以确保立即响应。
         """
         # Commands are handled immediately — do not queue
-        if message.content.startswith("/") and _is_command(message.content):
+        # Strip mention prefix so "@机器人 /restart" is recognized as a command
+        if _is_command(message.content):
             # Authenticate first
             auth_result = self.auth.authenticate(message.user_open_id)
             if not auth_result.authorized:
@@ -294,9 +305,35 @@ class MessageHandler:
         )
         await self._run_query(message, session, sdk_session_id, system_prompt_append, session_key)
 
+    def _get_claude_cli_path(self) -> str:
+        """Get the claude CLI path from the integration or pool."""
+        if isinstance(self.claude, ClaudeIntegration):
+            return self.claude.cli_path
+        # For pool, get cli_path from the integration kwargs stored in the pool
+        if hasattr(self.claude, "_integration_kwargs"):
+            return self.claude._integration_kwargs.get("cli_path", "claude")
+        return "claude"
+
+    def _get_claude_version(self) -> str:
+        """Run `claude --version` and return the version string, or 'unknown' on failure."""
+        import subprocess
+        cli_path = self._get_claude_cli_path()
+        try:
+            result = subprocess.run(
+                [cli_path, "--version"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+            return "unknown"
+        except Exception:
+            return "unknown"
+
     async def _handle_command(self, message: IncomingMessage) -> HandlerResult:
         """Handle slash commands like /new, /status."""
-        parts = message.content.split(maxsplit=1)
+        # Strip mention prefix so "@机器人 /status" is parsed as "/status"
+        content = _MENTION_RE.sub("", message.content).strip()
+        parts = content.split(maxsplit=1)
         cmd = parts[0].lower()
         arg = parts[1] if len(parts) > 1 else ""
 
@@ -313,17 +350,21 @@ class MessageHandler:
         elif cmd == "/status":
             import os
             from cc_feishu_bridge import __version__
-            session = self.sessions.get_active_session(message.user_open_id)
+            # Use chat_id for group chats (sessions are keyed by chat_id), user_open_id for p2p
+            session_key = message.chat_id if message.chat_type == "group" else message.user_open_id
+            session = self.sessions.get_active_session(session_key)
             if not session:
                 return HandlerResult(
                     success=True,
                     response_text="暂无活跃会话",
                 )
+            claude_version = self._get_claude_version()
             return HandlerResult(
                 success=True,
                 response_text=(
                     f"📊 会话状态\n"
-                    f"版本: {__version__}\n"
+                    f"Bridge 版本: {__version__}\n"
+                    f"Claude Code 版本: {claude_version}\n"
                     f"PID: {os.getpid()}\n"
                     f"会话ID: {session.session_id}\n"
                     f"消息数: {session.message_count}\n"
