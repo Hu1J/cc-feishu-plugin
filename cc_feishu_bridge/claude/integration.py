@@ -84,26 +84,19 @@ class ClaudeIntegration:
         self._system_prompt_append = system_prompt_append
         self._system_prompt_dirty = False
 
-        is_resuming = sdk_session_id is not None
-
         options = ClaudeAgentOptions(
             cwd=self.approved_directory or ".",
             max_turns=self.max_turns,
             cli_path=self.cli_path,
             include_partial_messages=True,
             permission_mode="bypassPermissions",
+            # SDK 内部自动维护 session 状态，每次 query 接着上一次继续
+            continue_conversation=True,
             mcp_servers={
                 "memory": get_memory_mcp_server(),
                 "feishu_file": get_feishu_file_mcp_server(),
             },
         )
-
-        if is_resuming:
-            # 恢复已有会话：fork 出来继续，保留历史
-            options.session_id = sdk_session_id
-            options.fork_session = True
-            options.continue_conversation = True
-        # else: 全新会话，不设置 session_id/fork_session/continue_conversation
 
         if system_prompt_append:
             options.system_prompt = {
@@ -113,29 +106,11 @@ class ClaudeIntegration:
             }
 
         self._client = ClaudeSDKClient(options=options)
-        self._client_session_id = sdk_session_id
 
-        try:
-            await self._client.connect()
-        except Exception as e:
-            # fork_session 模式下，如果会话被其他进程占用，CLI 退出码为 1。
-            # 此时降级到全新会话。
-            if is_resuming and getattr(e, "exit_code", None) == 1:
-                logger.warning(
-                    f"[ClaudeIntegration.connect] Session {sdk_session_id!r} already in use "
-                    f"(exit code 1), falling back to fresh session"
-                )
-                await self.connect(sdk_session_id=None, system_prompt_append=system_prompt_append)
-                return None
-            raise
-
+        await self._client.connect()
         self._client_ready = True
 
-        logger.info(
-            f"[ClaudeIntegration.connect] CLI process started, "
-            f"is_resuming={is_resuming}, sdk_session_id={sdk_session_id!r}"
-        )
-        return self._client_session_id
+        logger.info("[ClaudeIntegration.connect] CLI process started, continue_conversation=True")
 
     async def disconnect(self) -> None:
         """关闭持久 CLI 进程。"""
@@ -183,44 +158,27 @@ class ClaudeIntegration:
             )
 
         try:
-            from cc_feishu_bridge.claude.memory_tools import get_memory_mcp_server
-            from cc_feishu_bridge.claude.feishu_file_tools import get_feishu_file_mcp_server
-
-            # 动态更新 system_prompt（如果有变化）
-            if system_prompt_append:
-                # system_prompt 是只读的，直接传 append 方式
-                pass  # 已通过 connect 时的 options 设置，这里不再重复设置
-
             result_text = ""
-            result_session_id = self._client_session_id
+            result_session_id = None
             result_cost = 0.0
 
             logger.info(
-                f"[ClaudeIntegration.query] >>> session_id={session_id!r}, "
-                f"client_session_id={self._client_session_id!r}, "
-                f"cwd={cwd or self.approved_directory!r}"
+                f"[ClaudeIntegration.query] >>> cwd={cwd or self.approved_directory!r}"
             )
 
-            # 通过持久 client 发送 query
-            await self._client.query(prompt=prompt, session_id=session_id)
+            # 通过持久 client 发送 query，SDK 自动维护 session 继续
+            await self._client.query(prompt=prompt)
 
             async for message in self._client.receive_response():
                 msg_type = type(message).__name__
 
                 if msg_type == "ResultMessage":
                     result_text = getattr(message, "result", "") or ""
-                    result_session_id = getattr(message, "session_id", session_id) or session_id
+                    result_session_id = getattr(message, "session_id", None)
                     result_cost = getattr(message, "total_cost_usd", 0.0) or 0.0
-                    # 更新 session_id（如果 CLI 返回了新的）
-                    if result_session_id and result_session_id != self._client_session_id:
-                        logger.info(
-                            f"[ClaudeIntegration.query] session changed: "
-                            f"{self._client_session_id!r} -> {result_session_id!r}"
-                        )
-                        self._client_session_id = result_session_id
+                    # 只打印 session_id，不存储也不用于后续
                     logger.info(
-                        f"[ClaudeIntegration.query] <<< result_session_id={result_session_id!r}, "
-                        f"cost={result_cost!r}"
+                        f"[ClaudeIntegration.query] <<< session_id={result_session_id!r}, cost={result_cost!r}"
                     )
 
                 if on_stream:

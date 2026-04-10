@@ -74,10 +74,14 @@ class _FeishuHandler(logging.Handler):
 
             text = f"{level_tag} {msg}"
 
-            # Fire-and-forget — don't block the logging thread
-            asyncio.get_event_loop().call_soon_threadsafe(
-                lambda: _send_async(text)
-            )
+            # Fire-and-forget — don't block the logging thread.
+            # run_coroutine_threadsafe properly schedules async functions from any thread.
+            try:
+                loop = asyncio.get_event_loop()
+                asyncio.run_coroutine_threadsafe(_send_async(text), loop)
+            except Exception:
+                # Never let logging errors propagate
+                pass
         except Exception:
             # Never let logging errors propagate
             pass
