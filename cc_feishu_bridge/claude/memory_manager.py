@@ -96,6 +96,18 @@ class MemoryManager:
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self._system_prompt_stale_callback: Callable | None = None
+
+    def set_system_prompt_stale_callback(self, cb: Callable) -> None:
+        """设置 system prompt 过期回调。记忆变更时被调用。"""
+        self._system_prompt_stale_callback = cb
+
+    def _notify_system_prompt_stale(self) -> None:
+        if self._system_prompt_stale_callback:
+            try:
+                self._system_prompt_stale_callback()
+            except Exception:
+                pass
 
     # ── 类级别共享缓存（所有实例共享同一份，防止多实例缓存碎片化）─────────────
     _tfidf_cache: dict = {}
@@ -195,6 +207,7 @@ class MemoryManager:
         # Invalidate user preference cache
         with self._prefs_cache_lock:
             self._prefs_cache.pop((self.db_path, user_open_id), None)
+        self._notify_system_prompt_stale()
         return pref
 
     def get_all_preferences(self) -> list[UserPreference]:
@@ -298,6 +311,7 @@ class MemoryManager:
         if uid:
             with self._prefs_cache_lock:
                 self._prefs_cache.pop((self.db_path, uid), None)
+        self._notify_system_prompt_stale()
         return affected > 0
 
     def delete_preference(self, pref_id: str) -> bool:
@@ -317,6 +331,7 @@ class MemoryManager:
         if uid:
             with self._prefs_cache_lock:
                 self._prefs_cache.pop((self.db_path, uid), None)
+        self._notify_system_prompt_stale()
         return affected > 0
 
     def inject_context(
@@ -381,6 +396,7 @@ class MemoryManager:
             )
         # Invalidate TF-IDF cache (thread-safe)
         self._invalidate_tfidf_cache(project_path)
+        self._notify_system_prompt_stale()
         return mem
 
     def _invalidate_tfidf_cache(self, project_path: str):
@@ -574,6 +590,7 @@ class MemoryManager:
         # Invalidate TF-IDF cache
         if proj_path:
             self._invalidate_tfidf_cache(proj_path)
+        self._notify_system_prompt_stale()
         return affected > 0
 
     def delete_project_memory(self, memory_id: str) -> dict | None:
@@ -594,6 +611,7 @@ class MemoryManager:
             proj_path = deleted.get("project_path", "")
             if proj_path:
                 self._invalidate_tfidf_cache(proj_path)
+            self._notify_system_prompt_stale()
             return deleted
 
     def clear_project_memories(self, project_path: str) -> int:
@@ -616,4 +634,5 @@ class MemoryManager:
 
         # Invalidate TF-IDF cache（无论 count 是否为 0 都清理）
         self._invalidate_tfidf_cache(project_path)
+        self._notify_system_prompt_stale()
         return count
