@@ -513,50 +513,33 @@ class MessageHandler:
             lines += f"| `{k}` | {v_str} |\n"
         return lines
 
-    def _fmt_pref_table(self, prefs: list, total: int, page: int = 1) -> str:
-        """将用户偏好列表渲染为 MD 表格（支持分页）。"""
-        start = (page - 1) * self._MEM_PAGE_SIZE
-        page_items = prefs[start:start + self._MEM_PAGE_SIZE]
-        total_pages = (total + self._MEM_PAGE_SIZE - 1) // self._MEM_PAGE_SIZE
-
-        header = f"👤 **用户偏好**（共 {total} 条，第 {page}/{total_pages} 页）\n\n"
+    def _fmt_pref_table(self, prefs: list, total: int) -> str:
+        """将用户偏好列表渲染为 MD 表格（一次性输出）。"""
+        header = f"👤 **用户偏好**（共 {total} 条）\n\n"
         header += "| # | 标题 | 内容摘要 | 关键词 | ID |"
         header += "\n|---|------|----------|--------|---|"
-        for i, p in enumerate(page_items, start=start + 1):
+        for i, p in enumerate(prefs, start=1):
             content_short = p.content[:60] + ("…" if len(p.content) > 60 else "")
-            # 转义所有可能破坏 MD 表格结构的字符
             def esc(s: str) -> str:
                 return s.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
             title_esc = esc(p.title)
             content_esc = esc(content_short)
             header += f"\n| {i} | {title_esc} | {content_esc} | {esc(p.keywords)} | `{p.id}` |"
+        return header
 
-        nav = ""
-        if total_pages > 1:
-            nav = f"\n> 📖 第 {page}/{total_pages} 页，输入 /memory user list 翻页"
-        return header + nav
-
-    def _fmt_proj_table(self, mems: list, total: int, page: int = 1) -> str:
-        """将项目记忆列表渲染为 MD 表格（支持分页）。"""
-        start = (page - 1) * self._MEM_PAGE_SIZE
-        page_items = mems[start:start + self._MEM_PAGE_SIZE]
-        total_pages = (total + self._MEM_PAGE_SIZE - 1) // self._MEM_PAGE_SIZE
-
-        header = f"📁 **项目记忆**（共 {total} 条，第 {page}/{total_pages} 页）\n\n"
+    def _fmt_proj_table(self, mems: list, total: int) -> str:
+        """将项目记忆列表渲染为 MD 表格（一次性输出）。"""
+        header = f"📁 **项目记忆**（共 {total} 条）\n\n"
         header += "| # | 标题 | 内容摘要 | 关键词 | ID |"
         header += "\n|---|------|----------|--------|---|"
-        for i, m in enumerate(page_items, start=start + 1):
+        for i, m in enumerate(mems, start=1):
             content_short = m.content[:60] + ("…" if len(m.content) > 60 else "")
             def esc(s: str) -> str:
                 return s.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
             title_esc = esc(m.title)
             content_esc = esc(content_short)
             header += f"\n| {i} | {title_esc} | {content_esc} | {esc(m.keywords)} | `{m.id}` |"
-
-        nav = ""
-        if total_pages > 1:
-            nav = f"\n> 📖 第 {page}/{total_pages} 页，输入 /memory proj list 翻页"
-        return header + nav
+        return header
 
     async def _handle_memory_user(self, user_open_id: str, action: str, raw_args: str) -> HandlerResult:
         """Handle /memory user <action>."""

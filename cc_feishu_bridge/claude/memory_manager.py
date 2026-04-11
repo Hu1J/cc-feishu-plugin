@@ -46,11 +46,19 @@ MEMORY_SYSTEM_GUIDE = """
 搜索没有 → 自己研究 → 成功后主动问"需要记住吗？"
 用户确认后用 mcp__memory__MemoryAddProj（关键词逗号分隔）
 
-mcp__memory__MemoryAddProj — 新增项目记忆
+## 项目记忆（按项目隔离）
+mcp__memory__MemoryAddProj — 新增项目记忆（关键词逗号分隔）
 mcp__memory__MemoryDeleteProj — 删除项目记忆
 mcp__memory__MemoryUpdateProj — 编辑项目记忆
 mcp__memory__MemoryListProj — 列出项目记忆
 mcp__memory__MemorySearchProj — 搜索项目记忆
+
+## 用户偏好（按飞书用户隔离，MCP 自动从当前会话获取 user_open_id）
+mcp__memory__MemoryAddUser — 新增用户偏好（title + content + keywords 三样必填，关键词逗号分隔）
+mcp__memory__MemoryUpdateUser — 更新用户偏好（id + title + content + keywords）
+mcp__memory__MemoryDeleteUser — 删除用户偏好（只需 id）
+mcp__memory__MemoryListUser — 列出当前用户偏好
+mcp__memory__MemorySearchUser — 搜索用户偏好
 """
 
 

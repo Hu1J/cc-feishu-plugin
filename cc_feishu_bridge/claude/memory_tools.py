@@ -1,6 +1,7 @@
 """Memory MCP tools — 10 tools, one per /memory command."""
 from __future__ import annotations
 
+import os
 import threading
 
 from cc_feishu_bridge.claude.memory_manager import get_memory_manager
@@ -33,16 +34,18 @@ def _build_memory_mcp_server():
 
     @tool(
         "MemoryAddUser",
-        "新增一条用户偏好（按飞书用户隔离，user_open_id 来自当前会话）。title + content + keywords 三样必填，关键词用逗号分隔。",
-        {"title": str, "content": str, "keywords": str, "user_open_id": str},
+        "新增一条用户偏好（自动使用当前飞书用户身份）。title + content + keywords 三样必填，关键词用逗号分隔。",
+        {"title": str, "content": str, "keywords": str},
     )
     async def memory_add_user(args: dict) -> dict:
         title = args.get("title", "").strip()
         content = args.get("content", "").strip()
         keywords = args.get("keywords", "").strip()
-        user_open_id = args.get("user_open_id", "").strip()
+        user_open_id = args.get("user_open_id", "").strip() or _get_user_open_id()
         if not title or not content or not keywords:
             return {"content": [{"type": "text", "text": "title、content、keywords 三样必填"}], "is_error": True}
+        if not user_open_id:
+            return {"content": [{"type": "text", "text": "无法获取当前用户身份，请确保在飞书私聊中使用"}], "is_error": True}
         mm = get_memory_manager()
         try:
             p = mm.add_preference(user_open_id, title, content, keywords)
@@ -81,13 +84,16 @@ def _build_memory_mcp_server():
 
     @tool(
         "MemoryListUser",
-        "列出当前用户的所有偏好（按飞书 user_open_id 隔离）。",
-        {"user_open_id": str},
+        "列出当前用户的所有偏好（自动使用当前飞书用户身份）。",
+        {},
     )
     async def memory_list_user(args: dict) -> dict:
-        user_open_id = args.get("user_open_id", "").strip()
+        user_open_id = args.get("user_open_id", "").strip() or _get_user_open_id()
         mm = get_memory_manager()
-        prefs = mm.get_preferences_by_user(user_open_id) if user_open_id else mm.get_all_preferences()
+        if user_open_id:
+            prefs = mm.get_preferences_by_user(user_open_id)
+        else:
+            prefs = mm.get_all_preferences()
         if not prefs:
             return {"content": [{"type": "text", "text": "📭 暂无用户偏好记录。"}]}
         lines = [f"👤 用户偏好（共 {len(prefs)} 条）\n"]
@@ -98,12 +104,12 @@ def _build_memory_mcp_server():
 
     @tool(
         "MemorySearchUser",
-        "搜索用户偏好（全文检索）。按飞书 user_open_id 隔离。",
-        {"query": str, "user_open_id": str},
+        "搜索用户偏好（全文检索，自动使用当前飞书用户身份）。",
+        {"query": str},
     )
     async def memory_search_user(args: dict) -> dict:
         query = args.get("query", "").strip()
-        user_open_id = args.get("user_open_id", "").strip()
+        user_open_id = args.get("user_open_id", "").strip() or _get_user_open_id()
         if not query:
             return {"content": [{"type": "text", "text": "查询词不能为空"}], "is_error": True}
         mm = get_memory_manager()
@@ -230,6 +236,17 @@ def _build_memory_mcp_server():
 
 _mcp_server = None
 _mcp_server_lock = threading.Lock()
+
+
+def _get_user_open_id() -> str | None:
+    """从当前活跃会话获取 user_open_id。"""
+    from cc_feishu_bridge.claude.session_manager import SessionManager
+    from cc_feishu_bridge.config import resolve_config_path
+    _, data_dir = resolve_config_path()
+    db_path = os.path.join(data_dir, "sessions.db")
+    sm = SessionManager(db_path=db_path)
+    session = sm.get_active_session_by_chat_id()
+    return session.user_id if session else None
 
 
 def get_memory_mcp_server():
