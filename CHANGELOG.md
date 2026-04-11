@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.17] - 2026-04-11
+
+### Fixed
+- **/stop 打断失效**：interrupt 后 disconnect CLI 进程，避免 session 上下文损坏导致下次对话牛头不对马嘴
+- **/stop 重复调用 crash**：增加 `_worker_task.done()` 检查，防止连续两次调用导致 `AttributeError`
+
+### Added
+- **用户偏好工具自动获取 user_open_id**：MemoryAddUser/MemoryListUser/MemorySearchUser 不再需要传 user_open_id，MCP 内部自动从当前活跃会话获取
+- **MEMORY_SYSTEM_GUIDE 用户记忆说明**：新增用户偏好工具说明
+
+### Changed
+- **移除分页机制**：用户偏好和项目记忆列表一次性输出，不再有翻页
+
 ## [0.3.16] - 2026-04-11
 
 ### Added

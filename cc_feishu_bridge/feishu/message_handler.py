@@ -961,10 +961,15 @@ class MessageHandler:
         if not self._is_processing:
             await self._safe_send(message.chat_id, message.message_id, "当前没有正在运行的查询。")
             return HandlerResult(success=True)
+        # 立即标记为非运行状态，防止重复调用
+        self._is_processing = False
+        if self._worker_task is not None and not self._worker_task.done():
+            self._worker_task.cancel()
+            self._worker_task = None
         await self.claude.interrupt_current()
-        self._worker_task.cancel()
-        self._worker_task = None
-        await self._safe_send(message.chat_id, message.message_id, "🛑 已发送停止信号，Claude 将中断当前任务。")
+        # 断开 CLI 进程，强制终止（持久 client 不手动 disconnect 不会停）
+        await self.claude.disconnect()
+        await self._safe_send(message.chat_id, message.message_id, "🛑 已打断 Claude，当前任务已停止。")
         return HandlerResult(success=True)
 
     async def _handle_git(self, message: IncomingMessage) -> HandlerResult:
