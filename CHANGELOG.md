@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.18] - 2026-04-12
+
+### Fixed
+- **主动推送与正常对话并发冲突**：ProactiveScheduler 每次推送创建独立 ClaudeIntegration 实例，用完立即 disconnect()，不再与 MessageHandler 共享进程
+- **connect 3次重试机制**：缓解 Windows SDK 初始化超时（Control request timeout: initialize）
+- **3次重试全失败时发送错误消息**：SDK 空响应重试 3 次全部失败，不再静默吞掉，主动通知用户
+
+### Added
+- **SDK 空响应自动重试**：收到空响应时自动重试，最多重试 3 次
+- **ClaudeIntegration.ensure_connected()**：公共懒连接方法，统一 MessageHandler 和主动推送的连接逻辑
+- **标题去重**：主动推送消息去除 Claude 回复中自带的 emoji 标题前缀，避免「📋 项目进展提醒」重复
+
+### Changed
+- **/stop 不再主动 disconnect**：保持 session 连续性，避免上下文丢失
+
 ## [0.3.17] - 2026-04-11
 
 ### Fixed
