@@ -99,7 +99,23 @@ class ClaudeIntegration:
 
         self._client = ClaudeSDKClient(options=options)
 
-        await self._client.connect()
+        # SDK connect 有概率在 Windows 上超时，重试最多 3 次
+        last_err = None
+        for attempt in range(3):
+            try:
+                await self._client.connect()
+                break
+            except Exception as e:
+                last_err = e
+                logger.warning(f"[ClaudeIntegration.connect] attempt {attempt + 1} failed: {e}")
+                if attempt < 2:
+                    # 重置 client，准备重试
+                    self._client = ClaudeSDKClient(options=options)
+        else:
+            # 3 次全失败
+            self._client = None
+            raise last_err
+
         self._client_ready = True
 
         logger.info("[ClaudeIntegration.connect] CLI process started, continue_conversation=True")
