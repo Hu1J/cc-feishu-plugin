@@ -46,11 +46,18 @@ async def _send_proactive_message(
         data_dir=config.data_dir,
     )
 
+    # 创建独立的 Claude 进程，不与 MessageHandler 共享（避免并发冲突）
     claude = ClaudeIntegration(
         cli_path=config.claude.cli_path,
-        max_turns=3,
+        max_turns=5,
         approved_directory=session.project_path,
     )
+
+    try:
+        await claude.connect()
+    except Exception as e:
+        logger.warning(f"Proactive Claude connect failed: {e}")
+        return
 
     prompt = PROMPT_TEMPLATE.format(project_path=session.project_path)
 
@@ -59,11 +66,20 @@ async def _send_proactive_message(
     except Exception as e:
         logger.warning(f"Proactive Claude call failed: {e}")
         return
+    finally:
+        await claude.disconnect()
 
     if not response or not response.strip():
         return
 
-    text = f"📋 项目进展提醒\n\n{response.strip()}"
+    # 去除 Claude 回复中可能自带的 emoji 标题前缀，避免重复
+    cleaned = response.strip()
+    for prefix in ("📋 项目进展提醒", "📋 项目提醒", "📋 项目进展", "📋 进展提醒", "📋 项目"):
+        if cleaned.startswith(prefix):
+            cleaned = cleaned[len(prefix):].lstrip("：: \n")
+            break
+
+    text = f"📋 项目进展提醒\n\n{cleaned}"
 
     try:
         await feishu.send_text(session.chat_id, text)

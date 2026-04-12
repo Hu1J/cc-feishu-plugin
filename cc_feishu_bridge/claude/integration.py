@@ -122,6 +122,15 @@ class ClaudeIntegration:
         """返回 CLI 进程是否已连接。"""
         return self._client_ready and self._client is not None
 
+    async def ensure_connected(self, system_prompt_append: str | None = None) -> None:
+        """
+        确保 CLI 已连接，未连接或 system prompt 已过期时自动重连。
+        """
+        needs_reconnect = not self.is_connected() or self._system_prompt_dirty
+        if not needs_reconnect:
+            return
+        await self.connect(system_prompt_append)
+
     # -------------------------------------------------------------------------
     # Query
     # -------------------------------------------------------------------------

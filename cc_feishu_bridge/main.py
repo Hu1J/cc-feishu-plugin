@@ -290,7 +290,7 @@ def start_bridge(config_path: str, data_dir: str) -> None:
         sub_dir = os.path.join(data_dir, sub)
         os.makedirs(sub_dir, exist_ok=True)
 
-    # Start proactive scheduler
+    # Start proactive scheduler (uses its own independent ClaudeIntegration instance)
     proactive = ProactiveScheduler(config, handler.sessions)
     proactive.start()
 

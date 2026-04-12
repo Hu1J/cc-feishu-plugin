@@ -178,18 +178,11 @@ class MessageHandler:
         - 如果尚未连接，建立连接
         - 如果 system prompt 已过期（dirty flag），断开重连
         """
-        needs_reconnect = (
-            not self.claude.is_connected()
-            or self.claude._system_prompt_dirty  # type: ignore[attr-defined]
-        )
-
-        if not needs_reconnect:
-            return
-
-        logger.info(
-            f"[_ensure_connected] CLI connecting, dirty={self.claude._system_prompt_dirty!r}"  # type: ignore[attr-defined]
-        )
-        await self.claude.connect(system_prompt_append)
+        if self.claude._system_prompt_dirty:  # type: ignore[attr-defined]
+            logger.info(
+                f"[_ensure_connected] CLI reconnecting, dirty={self.claude._system_prompt_dirty!r}"  # type: ignore[attr-defined]
+            )
+        await self.claude.ensure_connected(system_prompt_append)
 
     async def _worker_loop(self) -> None:
         """串行出队并处理消息。"""
