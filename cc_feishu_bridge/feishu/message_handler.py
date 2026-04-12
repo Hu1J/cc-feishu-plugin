@@ -927,6 +927,14 @@ class MessageHandler:
                         f"[_run_query] Empty response (cost={cost}), retrying "
                         f"({retry_round + 1}/3)"
                     )
+            else:
+                # 3 次重试全部失败
+                logger.error(f"[_run_query] 3 次重试均失败，放弃查询")
+                await self._safe_send(
+                    message.chat_id, message.message_id,
+                    "⚠️ 查询失败：SDK 返回空响应，请稍后重试。"
+                )
+                return
 
             # Save session
             if not session:
