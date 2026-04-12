@@ -767,128 +767,6 @@ class MessageHandler:
                     quoted_content = f"[引用消息不可用: {message.parent_id}]"
                     logger.warning(f"Failed to fetch quoted message {message.parent_id}")
 
-            # Accumulator sends text chunks to Feishu in real-time (with buffering).
-            # Tool calls flush text immediately, then are sent separately.
-            # After streaming, if text was sent during stream, skip the final response
-            # to avoid duplication — the streamed content is already there.
-            accumulator = StreamAccumulator(message.chat_id, message.message_id, self._safe_send)
-
-            async def stream_callback(claude_msg):
-                if claude_msg.tool_name:
-                    await accumulator.flush()
-                    # 记忆工具传入 memory_manager 和默认 project_path
-                    kwargs = {}
-                    if claude_msg.tool_name.startswith("mcp__memory__"):
-                        kwargs["memory_manager"] = self.memory_manager
-                        kwargs["default_project_path"] = getattr(self, "_current_project_path", "")
-                    result = self.formatter.format_tool_call(
-                        claude_msg.tool_name,
-                        claude_msg.tool_input,
-                        **kwargs,
-                    )
-                    logger.info(f"[stream] tool: {claude_msg.tool_name} | input: {claude_msg.tool_input}")
-
-                    # _DiffMarker / list[_DiffMarker] → 彩色卡片；其他 → backtick 格式
-                    if isinstance(result, _DiffMarker):
-                        for card in result.card if isinstance(result.card, list) else [result.card]:
-                            try:
-                                await self.feishu.send_edit_diff_card(
-                                    message.chat_id, card, message.message_id, log_reply=False
-                                )
-                            except Exception:
-                                # 卡片发送失败，降级为带图标的纯文本
-                                import json
-                                try:
-                                    data = json.loads(result.tool_input)
-                                    file_path = data.get("file_path", "unknown")
-                                    # 图标规则：Edit→✏️，cc-工具名→🧰，Bash调用skill→🧰，其他→📝
-                                    if result.tool_name == "Edit":
-                                        icon = "✏️"
-                                    elif result.tool_name.startswith("cc-"):
-                                        icon = "🧰"
-                                    elif result.tool_name == "Bash":
-                                        cmd = data.get("command", "")
-                                        if "~/.claude/skills/" in cmd or cmd.startswith("cc-"):
-                                            icon = "🧰"
-                                        else:
-                                            icon = "📝"
-                                    else:
-                                        icon = "📝"
-                                    fallback = f"{icon} **{result.tool_name}** — `{file_path}`"
-                                except Exception:
-                                    fallback = f"🤖 **{result.tool_name}**\n`{result.tool_input[:500]}`"
-                                logger.warning(f"send_edit_diff_card failed, falling back to: {fallback}")
-                                await self._safe_send(message.chat_id, message.message_id, fallback, log_reply=False)
-                    elif isinstance(result, list):
-                        for marker in result:
-                            if isinstance(marker, _DiffMarker):
-                                for card in marker.card if isinstance(marker.card, list) else [marker.card]:
-                                    try:
-                                        await self.feishu.send_edit_diff_card(
-                                            message.chat_id, card, message.message_id, log_reply=False
-                                        )
-                                    except Exception:
-                                        import json
-                                        try:
-                                            data = json.loads(marker.tool_input)
-                                            file_path = data.get("file_path", "unknown")
-                                            if marker.tool_name == "Edit":
-                                                icon = "✏️"
-                                            elif marker.tool_name.startswith("cc-"):
-                                                icon = "🧰"
-                                            elif marker.tool_name == "Bash":
-                                                cmd = data.get("command", "")
-                                                if "~/.claude/skills/" in cmd or cmd.startswith("cc-"):
-                                                    icon = "🧰"
-                                                else:
-                                                    icon = "📝"
-                                            else:
-                                                icon = "📝"
-                                            fallback = f"{icon} **{marker.tool_name}** — `{file_path}`"
-                                        except Exception:
-                                            fallback = f"🤖 **{marker.tool_name}**\n`{marker.tool_input[:500]}`"
-                                        logger.warning(f"send_edit_diff_card failed, falling back to: {fallback}")
-                                        await self._safe_send(message.chat_id, message.message_id, fallback, log_reply=False)
-                    elif isinstance(result, _MemoryCardMarker):
-                        # 记忆工具 → Feishu Interactive Card（按 card_type 渲染）
-                        card_md = self._render_memory_card(result)
-                        try:
-                            await self.feishu.send_interactive_reply(
-                                message.chat_id,
-                                self.formatter.format_text(card_md),
-                                message.message_id,
-                                log_reply=False,
-                            )
-                        except Exception:
-                            logger.warning(f"send_interactive_reply failed for memory tool, falling back")
-                            await self._safe_send(message.chat_id, message.message_id, result.card_md, log_reply=False)
-                    elif isinstance(result, _AskUserQuestionMarker):
-                        # AskUserQuestion → 精美飞书问卷卡片
-                        if result.data is not None:
-                            card = format_questionnaire_card(result)
-                            try:
-                                await self.feishu.send_edit_diff_card(
-                                    message.chat_id, card, message.message_id, log_reply=False
-                                )
-                            except Exception as e:
-                                logger.warning(f"send_edit_diff_card failed for AskUserQuestion: {e}, falling back")
-                                await self._safe_send(
-                                    message.chat_id, message.message_id,
-                                    f"🤖 **{result.tool_name}**\n`{result.tool_input[:500]}`",
-                                    log_reply=False,
-                                )
-                        else:
-                            await self._safe_send(
-                                message.chat_id, message.message_id,
-                                f"🤖 **{result.tool_name}**\n`{result.tool_input[:500]}`",
-                                log_reply=False,
-                            )
-                    else:
-                        await self._safe_send(message.chat_id, message.message_id, result, log_reply=False)
-                elif claude_msg.content:
-                    logger.info(f"[stream] text: {claude_msg.content[:100]}")
-                    await accumulator.add_text(claude_msg.content)
-
             prefix_parts = [p for p in [media_prompt_prefix, quoted_content] if p]
             prefix = "\n".join(prefix_parts) + "\n" if prefix_parts else ""
             # For text messages: prepend prefix to actual text content.
@@ -905,14 +783,150 @@ class MessageHandler:
             else:
                 # Text messages: prepend prefix to actual text content
                 full_prompt = (prefix + message.content).strip()
-            response, _, cost = await self.claude.query(
-                prompt=full_prompt,
-                cwd=session.project_path if session else self.approved_directory,
-                on_stream=stream_callback,
-            )
 
-            # Flush any remaining buffered text
-            await accumulator.flush()
+            # Retry loop: SDK 有时会返回空结果（cost > 0 但无任何内容），
+            # 常见于 /stop 后 CLI 状态不稳或 MCP server 临时故障。
+            # 自动重试最多 3 次，每次用新的 accumulator 确保 stream 状态干净。
+            last_cost = 0.0
+            for retry_round in range(3):
+                accumulator = StreamAccumulator(message.chat_id, message.message_id, self._safe_send)
+
+                async def stream_callback(claude_msg):
+                    if claude_msg.tool_name:
+                        await accumulator.flush()
+                        # 记忆工具传入 memory_manager 和默认 project_path
+                        kwargs = {}
+                        if claude_msg.tool_name.startswith("mcp__memory__"):
+                            kwargs["memory_manager"] = self.memory_manager
+                            kwargs["default_project_path"] = getattr(self, "_current_project_path", "")
+                        result = self.formatter.format_tool_call(
+                            claude_msg.tool_name,
+                            claude_msg.tool_input,
+                            **kwargs,
+                        )
+                        logger.info(f"[stream] tool: {claude_msg.tool_name} | input: {claude_msg.tool_input}")
+
+                        # _DiffMarker / list[_DiffMarker] → 彩色卡片；其他 → backtick 格式
+                        if isinstance(result, _DiffMarker):
+                            for card in result.card if isinstance(result.card, list) else [result.card]:
+                                try:
+                                    await self.feishu.send_edit_diff_card(
+                                        message.chat_id, card, message.message_id, log_reply=False
+                                    )
+                                except Exception:
+                                    # 卡片发送失败，降级为带图标的纯文本
+                                    import json
+                                    try:
+                                        data = json.loads(result.tool_input)
+                                        file_path = data.get("file_path", "unknown")
+                                        # 图标规则：Edit→✏️，cc-工具名→🧰，Bash调用skill→🧰，其他→📝
+                                        if result.tool_name == "Edit":
+                                            icon = "✏️"
+                                        elif result.tool_name.startswith("cc-"):
+                                            icon = "🧰"
+                                        elif result.tool_name == "Bash":
+                                            cmd = data.get("command", "")
+                                            if "~/.claude/skills/" in cmd or cmd.startswith("cc-"):
+                                                icon = "🧰"
+                                            else:
+                                                icon = "📝"
+                                        else:
+                                            icon = "📝"
+                                        fallback = f"{icon} **{result.tool_name}** — `{file_path}`"
+                                    except Exception:
+                                        fallback = f"🤖 **{result.tool_name}**\n`{result.tool_input[:500]}`"
+                                    logger.warning(f"send_edit_diff_card failed, falling back to: {fallback}")
+                                    await self._safe_send(message.chat_id, message.message_id, fallback, log_reply=False)
+                        elif isinstance(result, list):
+                            for marker in result:
+                                if isinstance(marker, _DiffMarker):
+                                    for card in marker.card if isinstance(marker.card, list) else [marker.card]:
+                                        try:
+                                            await self.feishu.send_edit_diff_card(
+                                                message.chat_id, card, message.message_id, log_reply=False
+                                            )
+                                        except Exception:
+                                            import json
+                                            try:
+                                                data = json.loads(marker.tool_input)
+                                                file_path = data.get("file_path", "unknown")
+                                                if marker.tool_name == "Edit":
+                                                    icon = "✏️"
+                                                elif marker.tool_name.startswith("cc-"):
+                                                    icon = "🧰"
+                                                elif marker.tool_name == "Bash":
+                                                    cmd = data.get("command", "")
+                                                    if "~/.claude/skills/" in cmd or cmd.startswith("cc-"):
+                                                        icon = "🧰"
+                                                    else:
+                                                        icon = "📝"
+                                                else:
+                                                    icon = "📝"
+                                                fallback = f"{icon} **{marker.tool_name}** — `{file_path}`"
+                                            except Exception:
+                                                fallback = f"🤖 **{marker.tool_name}**\n`{marker.tool_input[:500]}`"
+                                            logger.warning(f"send_edit_diff_card failed, falling back to: {fallback}")
+                                            await self._safe_send(message.chat_id, message.message_id, fallback, log_reply=False)
+                        elif isinstance(result, _MemoryCardMarker):
+                            # 记忆工具 → Feishu Interactive Card（按 card_type 渲染）
+                            card_md = self._render_memory_card(result)
+                            try:
+                                await self.feishu.send_interactive_reply(
+                                    message.chat_id,
+                                    self.formatter.format_text(card_md),
+                                    message.message_id,
+                                    log_reply=False,
+                                )
+                            except Exception:
+                                logger.warning(f"send_interactive_reply failed for memory tool, falling back")
+                                await self._safe_send(message.chat_id, message.message_id, result.card_md, log_reply=False)
+                        elif isinstance(result, _AskUserQuestionMarker):
+                            # AskUserQuestion → 精美飞书问卷卡片
+                            if result.data is not None:
+                                card = format_questionnaire_card(result)
+                                try:
+                                    await self.feishu.send_edit_diff_card(
+                                        message.chat_id, card, message.message_id, log_reply=False
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"send_edit_diff_card failed for AskUserQuestion: {e}, falling back")
+                                    await self._safe_send(
+                                        message.chat_id, message.message_id,
+                                        f"🤖 **{result.tool_name}**\n`{result.tool_input[:500]}`",
+                                        log_reply=False,
+                                    )
+                            else:
+                                await self._safe_send(
+                                    message.chat_id, message.message_id,
+                                    f"🤖 **{result.tool_name}**\n`{result.tool_input[:500]}`",
+                                    log_reply=False,
+                                )
+                        else:
+                            await self._safe_send(message.chat_id, message.message_id, result, log_reply=False)
+                    elif claude_msg.content:
+                        logger.info(f"[stream] text: {claude_msg.content[:100]}")
+                        await accumulator.add_text(claude_msg.content)
+
+                response, _, cost = await self.claude.query(
+                    prompt=full_prompt,
+                    cwd=session.project_path if session else self.approved_directory,
+                    on_stream=stream_callback,
+                )
+                last_cost = cost
+
+                # Flush any remaining buffered text
+                await accumulator.flush()
+
+                # 如果这次尝试有实质内容（发了任何消息或返回了文本），认为成功，退出重试循环
+                if accumulator.sent_something or response:
+                    break
+
+                # 这次尝试是空结果（cost > 0 但没有任何内容），重试
+                if retry_round < 2:
+                    logger.warning(
+                        f"[_run_query] Empty response (cost={cost}), retrying "
+                        f"({retry_round + 1}/3)"
+                    )
 
             # Save session
             if not session:
@@ -921,8 +935,7 @@ class MessageHandler:
                     self.approved_directory,
                 )
             else:
-                self.sessions.update_session(session.session_id, cost=cost, message_increment=1)
-
+                self.sessions.update_session(session.session_id, cost=last_cost, message_increment=1)
 
             # Send final text response only if no text was streamed.
             # If text was streamed in real-time, it is already visible in the chat.
