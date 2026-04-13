@@ -252,7 +252,7 @@ def run_restart_cli(file_lock, feishu=None, chat_id: str | None = None):
         loop.close()
 
 
-def _start_bridge(project_path: str, timeout: float = 8.0) -> int:
+def _start_bridge(project_path: str, timeout: float = 60.0) -> int:
     """Start the bridge for project using subprocess.Popen with start_new_session=True.
 
     Returns the PID of the started process.

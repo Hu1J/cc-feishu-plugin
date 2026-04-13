@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.3.21] - 2026-04-13
+## [0.3.22] - 2026-04-13
 
 ### Changed
 - **/git 变更文件展示**：改用 git 标准字母（A/M/D/R 等），按类型着色（新增=绿，修改=橙，删除=红）

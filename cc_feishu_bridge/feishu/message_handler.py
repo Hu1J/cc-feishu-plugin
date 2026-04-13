@@ -278,13 +278,14 @@ class MessageHandler:
                     success=True,
                     response_text="暂无活跃会话",
                 )
+            sdk_sid = session.sdk_session_id or "(未建立)"
             return HandlerResult(
                 success=True,
                 response_text=(
                     f"📊 会话状态\n"
                     f"版本: {__version__}\n"
                     f"PID: {os.getpid()}\n"
-                    f"会话ID: {session.session_id}\n"
+                    f"会话ID: {sdk_sid}\n"
                     f"消息数: {session.message_count}\n"
                     f"累计费用: ${session.total_cost:.4f}\n"
                     f"工作目录: {session.project_path}"
@@ -1022,18 +1023,23 @@ class MessageHandler:
         # %cI = ISO 8601，无空格，split 不易错位
         log_lines = run_git(["log", "--format=%cI %h %s", "-5"]).splitlines()
 
-        # emoji 状态映射（font 标签在卡片内不稳定，改用 emoji）
-        status_icon = {
-            "M": "📝", "D": "🗑️", "A": "➕",
-            "R": "📛", "U": "⚠️", "?": "❓",
-        }
-
         # 构建单条 markdown 内容
         card_lines = [
             f"📊 **Git Status - {branch}**",
             "",
             "📝 **变更文件**",
         ]
+
+        # git 状态字母到颜色的映射
+        status_color = {
+            "A": "green",  # Added
+            "M": "orange", # Modified
+            "D": "red",    # Deleted
+            "R": "purple", # Renamed
+            "U": "red",    # Unmerged
+            "C": "gray",   # Copied
+            "?": "gray",   # Untracked
+        }
 
         has_changes = bool(status_output)
         if has_changes:
@@ -1046,8 +1052,9 @@ class MessageHandler:
                     char = wt_char if wt_char != " " else "?"
                 else:
                     char = idx_char
-                icon = status_icon.get(char, "•")
-                card_lines.append(f"{icon}  {line[3:]}")
+                color = status_color.get(char, "gray")
+                filename = line[3:]
+                card_lines.append(f"<font color='{color}'>{char}</font> {filename}")
         else:
             card_lines.append("✅ 工作区干净，无待提交变更")
 
