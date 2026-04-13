@@ -900,7 +900,7 @@ class MessageHandler:
                         logger.info(f"[stream] text: {claude_msg.content[:100]}")
                         await accumulator.add_text(claude_msg.content)
 
-                response, _, cost = await self.claude.query(
+                response, sdk_session_id_from_query, cost = await self.claude.query(
                     prompt=full_prompt,
                     cwd=session.project_path if session else self.approved_directory,
                     on_stream=stream_callback,
@@ -934,9 +934,20 @@ class MessageHandler:
                 session = self.sessions.create_session(
                     message.user_open_id,
                     self.approved_directory,
+                    sdk_session_id=sdk_session_id_from_query,
                 )
             else:
                 self.sessions.update_session(session.session_id, cost=last_cost, message_increment=1)
+
+            # 检测 sdk_session_id 变化，通知用户
+            if sdk_session_id_from_query and session.sdk_session_id != sdk_session_id_from_query:
+                logger.info(f"[_run_query] sdk_session_id changed: {session.sdk_session_id!r} -> {sdk_session_id_from_query!r}")
+                self.sessions.update_sdk_session_id(session.session_id, sdk_session_id_from_query)
+                await self._safe_send(
+                    message.chat_id, message.message_id,
+                    f"🔄 检测到新 Session，已自动切换\n新 Session ID: `{sdk_session_id_from_query}`",
+                    log_reply=False,
+                )
 
             # Send final text response only if no text was streamed.
             # If text was streamed in real-time, it is already visible in the chat.
