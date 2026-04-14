@@ -701,10 +701,14 @@ class MessageHandler:
     ) -> None:
         """Run Claude query in background, send results to Feishu on completion."""
         reaction_id = None
-        try:
-            # Add typing reaction
+
+        async def _show_typing() -> None:
+            """在 _query_lock 拿到后显示 typing（通过 on_start 回调传入 query）。"""
+            nonlocal reaction_id
             reaction_id = await self.feishu.add_typing_reaction(message.message_id)
             logger.info(f"[typing] on — user={message.user_open_id}, reaction_id={reaction_id!r}")
+
+        try:
 
             # Audio is not yet supported — tell the user and skip Claude
             if message.message_type == "audio":
@@ -898,6 +902,7 @@ class MessageHandler:
                 response, sdk_session_id_from_query, cost = await self.claude.query(
                     prompt=full_prompt,
                     on_stream=stream_callback,
+                    on_start=_show_typing,
                 )
                 last_cost = cost
 

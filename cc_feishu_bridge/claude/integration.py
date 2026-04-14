@@ -92,11 +92,13 @@ class ClaudeIntegration:
         self,
         prompt: str,
         on_stream: StreamCallback | None = None,
+        on_start: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[str, str | None, float]:
         """
         每个 query 内部创建独立 client，用完即销毁。
         启动时额外创建一个 listener 协程监听 stop_event，
         收到 /stop 信号时立即 interrupt 并 await consume_task。
+        on_start 回调在 _query_lock 拿到后立即调用（异步），用于显示 typing 等前置状态。
         """
         if self._options is None:
             raise RuntimeError(
@@ -106,6 +108,8 @@ class ClaudeIntegration:
         import time as time_module
 
         async with self._query_lock:
+            if on_start:
+                await on_start()
             t_query = time_module.time()
             self.stop_event.clear()
 
