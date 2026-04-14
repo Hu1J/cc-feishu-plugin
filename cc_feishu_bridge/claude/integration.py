@@ -28,9 +28,6 @@ class ClaudeIntegration:
         max_turns: int = 50,
         approved_directory: str | None = None,
     ):
-        # Resolve "claude" to its absolute path so the subprocess spawned by the SDK
-        # doesn't have to rely on PATH resolution (avoids issues on Windows where
-        # npm's claude.cmd may not be found by anyio.open_process).
         if cli_path == "claude":
             resolved = shutil.which("claude")
             self.cli_path = resolved if resolved else cli_path
@@ -38,73 +35,37 @@ class ClaudeIntegration:
             self.cli_path = cli_path
         self.max_turns = max_turns
         self.approved_directory = approved_directory
-        self._client: Optional[Any] = None  # 持久化 client
-        self._client_ready: bool = False
-        self._system_prompt_append: str | None = None  # 缓存当前 system prompt
-        self._system_prompt_dirty: bool = False  # True = 下次 query 前需重连
-        self._query_lock: asyncio.Lock = asyncio.Lock()  # 保证同一时间只有一个 query 在执行
-        self._interrupt_lock: asyncio.Lock = asyncio.Lock()  # 保证 interrupt 不能重入
+        self._options: Any = None  # 持久化的 ClaudeAgentOptions
+        self._client: Any = None  # 临时引用，当前 query 的 client
+        self._consume_task: asyncio.Task | None = None
+        self._system_prompt_append: str | None = None
+        self._query_lock = asyncio.Lock()  # 保证同一时间只有一个 query 在执行
+        self._interrupt_lock = asyncio.Lock()  # 保证 interrupt 不能重入
 
     # -------------------------------------------------------------------------
-    # System prompt stale marking
+    # Options 初始化
     # -------------------------------------------------------------------------
 
-    def mark_system_prompt_stale(self) -> None:
+    def _init_options(self, system_prompt_append: str | None = None,
+                      continue_conversation: bool = True) -> None:
         """
-        标记 system prompt 已过期，下一条消息处理前需要重连 CLI。
-
-        用户偏好/记忆更新时调用。
+        构建持久化 ClaudeAgentOptions，供整个 worker 生命周期复用。
+        system prompt 更新只需重新调用此方法。
         """
-        self._system_prompt_dirty = True
-        logger.info("[ClaudeIntegration] System prompt marked stale, will reconnect on next query")
-
-    # -------------------------------------------------------------------------
-    # Lifecycle: connect / disconnect
-    # -------------------------------------------------------------------------
-
-    async def connect(
-        self,
-        system_prompt_append: str | None = None,
-    ) -> None:
-        """
-        建立持久 CLI 进程。SDK 通过 continue_conversation=True 自动维护 session。
-        """
-        import time as time_module
-
-        if self._client is not None:
-            logger.info(f"[ClaudeIntegration.connect] existing client found, disconnecting first...")
-            t0 = time_module.time()
-            await self.disconnect()
-            logger.info(f"[ClaudeIntegration.connect] disconnect took {time_module.time() - t0:.1f}s")
-
-        from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
+        from claude_agent_sdk import ClaudeAgentOptions
         from cc_feishu_bridge.claude.memory_tools import get_memory_mcp_server
         from cc_feishu_bridge.claude.feishu_file_tools import get_feishu_file_mcp_server
 
-        self._system_prompt_append = system_prompt_append
-        self._system_prompt_dirty = False
-
-        t = time_module.time()
-        logger.info("[ClaudeIntegration.connect] getting memory MCP server...")
         memory_server = get_memory_mcp_server()
-        logger.info(f"[ClaudeIntegration.connect] memory MCP server ready in {time_module.time()-t:.1f}s")
-
-        t = time_module.time()
-        logger.info("[ClaudeIntegration.connect] getting feishu_file MCP server...")
         feishu_server = get_feishu_file_mcp_server()
-        logger.info(f"[ClaudeIntegration.connect] feishu_file MCP server ready in {time_module.time()-t:.1f}s")
-
-        logger.info(f"[ClaudeIntegration.connect] creating ClaudeSDKClient, cli_path={self.cli_path!r}, cwd={self.approved_directory!r}")
 
         options = ClaudeAgentOptions(
             cwd=self.approved_directory or ".",
             # NOTE: 不传 cli_path，让 SDK 使用内置的 bundled CLI。
-            # 显式指定 cli_path 在 Windows 上会导致 initialize() 超时，
-            # 因为 claude.CMD 这个 npm 包装器在 anyio.open_process 中
-            # 处理时存在问题。
+            # 显式指定 cli_path 在 Windows 上会导致 initialize() 超时。
             include_partial_messages=True,
             permission_mode="bypassPermissions",
-            continue_conversation=True,
+            continue_conversation=continue_conversation,
             mcp_servers={
                 "memory": memory_server,
                 "feishu_file": feishu_server,
@@ -118,70 +79,8 @@ class ClaudeIntegration:
                 "append": system_prompt_append,
             }
 
-        self._client = ClaudeSDKClient(options=options)
-
-        # SDK connect 有概率在 Windows 上超时，重试最多 3 次
-        last_err = None
-        for attempt in range(3):
-            logger.info(f"[ClaudeIntegration.connect] attempt {attempt + 1}/3, calling _client.connect()...")
-            t_connect = time_module.time()
-            try:
-                await self._client.connect()
-                elapsed = time_module.time() - t_connect
-                logger.info(f"[ClaudeIntegration.connect] attempt {attempt + 1} succeeded in {elapsed:.1f}s")
-                break
-            except Exception as e:
-                elapsed = time_module.time() - t_connect
-                last_err = e
-                logger.warning(f"[ClaudeIntegration.connect] attempt {attempt + 1} failed after {elapsed:.1f}s: {e}")
-                if attempt < 2:
-                    logger.info(f"[ClaudeIntegration.connect] recreating client for retry...")
-                    # 重置 client，准备重试
-                    self._client = ClaudeSDKClient(options=options)
-        else:
-            # 3 次全失败
-            self._client = None
-            self._client_ready = False
-            logger.error(f"[ClaudeIntegration.connect] all 3 attempts failed")
-            raise last_err
-
-        self._client_ready = True
-        logger.info("[ClaudeIntegration.connect] CLI process started, continue_conversation=True")
-
-    async def disconnect(self) -> None:
-        """关闭持久 CLI 进程。"""
-        if self._client is None:
-            logger.info("[ClaudeIntegration.disconnect] no client, returning")
-            return
-
-        logger.info("[ClaudeIntegration.disconnect] CLI process shutting down...")
-        try:
-            await self._client.disconnect()
-            logger.info("[ClaudeIntegration.disconnect] disconnect() returned successfully")
-        except Exception as e:
-            logger.warning(f"[ClaudeIntegration.disconnect] error: {e}")
-        finally:
-            self._client = None
-            self._client_ready = False
-            logger.info("[ClaudeIntegration.disconnect] client set to None, ready=False")
-
-    def is_connected(self) -> bool:
-        """返回 CLI 进程是否已连接。"""
-        return self._client_ready and self._client is not None
-
-    async def ensure_connected(self, system_prompt_append: str | None = None) -> None:
-        """
-        确保 CLI 已连接，未连接或 system prompt 已过期时自动重连。
-        """
-        connected = self.is_connected()
-        dirty = self._system_prompt_dirty
-        logger.info(f"[ClaudeIntegration.ensure_connected] is_connected={connected}, dirty={dirty}")
-        needs_reconnect = not connected or dirty
-        if not needs_reconnect:
-            logger.info("[ClaudeIntegration.ensure_connected] no reconnect needed")
-            return
-        logger.info(f"[ClaudeIntegration.ensure_connected] calling connect()...")
-        await self.connect(system_prompt_append)
+        self._options = options
+        self._system_prompt_append = system_prompt_append
 
     # -------------------------------------------------------------------------
     # Query
@@ -194,58 +93,57 @@ class ClaudeIntegration:
         on_stream: StreamCallback | None = None,
     ) -> tuple[str, str | None, float]:
         """
-        通过持久 CLI 进程发送消息。
-
-        协程锁保证同一时间只有一个 query 在执行，避免消息流并发消费混乱。
-
-        Returns: (response_text, new_session_id, cost_usd)
+        每个 query 内部创建独立 client，用完即销毁。
+        receive_response() 消费逻辑包进 _consume() 异步函数，
+        用 asyncio.create_task 启动，interrupt 时可单独 cancel。
         """
-        if self._client is None or not self._client_ready:
+        if self._options is None:
             raise RuntimeError(
-                "ClaudeIntegration not connected. Call connect() first."
+                "ClaudeIntegration not initialized. Call _init_options() first."
             )
 
         import time as time_module
-        try:
-            async with self._query_lock:
-                result_text = ""
-                result_session_id = None
-                result_cost = 0.0
 
-                logger.info(
-                    f"[ClaudeIntegration.query] >>> cwd={cwd or self.approved_directory!r}"
-                )
+        async with self._query_lock:
+            t_query = time_module.time()
+            # 每次 query 创建新 client，用完即销毁
+            from claude_agent_sdk import ClaudeSDKClient
+            async with ClaudeSDKClient(options=self._options) as client:
+                # 临时持有 client，让 interrupt_current() 能访问
+                self._client = client
 
-                t_query = time_module.time()
-                # 通过持久 client 发送 query，SDK 自动维护 session 继续
-                await self._client.query(prompt=prompt)
+                # 发送 prompt
+                await client.query(prompt=prompt)
 
-                async for message in self._client.receive_response():
-                    msg_type = type(message).__name__
+                # 后台消费任务（和官方示例一致）
+                async def _consume():
+                    result_text = ""
+                    result_session_id = None
+                    result_cost = 0.0
+                    async for message in client.receive_response():
+                        msg_type = type(message).__name__
+                        if msg_type == "ResultMessage":
+                            result_text = getattr(message, "result", "") or ""
+                            result_session_id = getattr(message, "session_id", None)
+                            result_cost = getattr(message, "total_cost_usd", 0.0) or 0.0
+                            elapsed = time_module.time() - t_query
+                            logger.info(
+                                f"[query] <<< session_id={result_session_id!r}, "
+                                f"cost={result_cost!r}, elapsed={elapsed:.1f}s"
+                            )
+                        if on_stream:
+                            parsed = self._parse_message(message)
+                            if parsed:
+                                await on_stream(parsed)
+                    return (result_text, result_session_id, result_cost)
 
-                    if msg_type == "ResultMessage":
-                        result_text = getattr(message, "result", "") or ""
-                        result_session_id = getattr(message, "session_id", None)
-                        result_cost = getattr(message, "total_cost_usd", 0.0) or 0.0
-                        elapsed = time_module.time() - t_query
-                        # 只打印 session_id，不存储也不用于后续
-                        logger.info(
-                            f"[ClaudeIntegration.query] <<< session_id={result_session_id!r}, cost={result_cost!r}, elapsed={elapsed:.1f}s"
-                        )
+                self._consume_task = asyncio.create_task(_consume())
+                result = await self._consume_task
 
-                    if on_stream:
-                        parsed = self._parse_message(message)
-                        if parsed:
-                            await on_stream(parsed)
-
-                return (result_text, result_session_id, result_cost)
-
-        except Exception as e:
-            elapsed = time_module.time() - t_query
-            logger.exception(f"[ClaudeIntegration.query] error after {elapsed:.1f}s: {e}")
-            # CLI 进程可能已崩溃，标记为未就绪
-            self._client_ready = False
-            raise
+            # async with 退出后 client 已销毁，清除引用
+            self._client = None
+            self._consume_task = None
+            return result
 
     # -------------------------------------------------------------------------
     # Interrupt
@@ -253,32 +151,19 @@ class ClaudeIntegration:
 
     async def interrupt_current(self) -> bool:
         """
-        Send SIGINT to the running Claude subprocess.
-
-        SIGINT 让 query() 里的 async for receive_response() 抛异常退出，
-        锁释放后我们再 drain 掉残留消息。
+        和官方示例完全对齐：interrupt + await consume_task。
+        两个锁都保留：_query_lock 保证同一时间只有一个 query，
+        _interrupt_lock 保证 interrupt 不重入。
         """
-        if self._client is None or not self._client_ready:
+        if self._client is None:
             return False
-        async with self._interrupt_lock:
-            try:
-                await self._client.interrupt()
-                logger.info("[ClaudeIntegration.interrupt_current] interrupt sent, draining...")
 
-                # 等 query() 的 receive_response 退出并释放锁后，再 drain 残留
-                # 加 10 秒超时，防止 CLI interrupt 后完全不响应导致永久卡住
-                async def _drain():
-                    async for _ in self._client.receive_response():
-                        pass
-                try:
-                    await asyncio.wait_for(_drain(), timeout=10.0)
-                    logger.info("[ClaudeIntegration.interrupt_current] stream drained")
-                except asyncio.TimeoutError:
-                    logger.warning("[ClaudeIntegration.interrupt_current] drain timed out after 10s, continuing anyway")
-                return True
-            except Exception as e:
-                logger.warning(f"[ClaudeIntegration.interrupt_current] error: {e}")
-                return False
+        async with self._interrupt_lock:
+            await self._client.interrupt()
+            if self._consume_task is not None:
+                await self._consume_task
+            logger.info("[interrupt_current] done")
+            return True
 
     # -------------------------------------------------------------------------
     # Helpers

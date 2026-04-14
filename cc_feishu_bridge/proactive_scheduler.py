@@ -52,12 +52,7 @@ async def _send_proactive_message(
         max_turns=5,
         approved_directory=session.project_path,
     )
-
-    try:
-        await claude.connect()
-    except Exception as e:
-        logger.warning(f"Proactive Claude connect failed: {e}")
-        return
+    claude._init_options()
 
     prompt = PROMPT_TEMPLATE.format(project_path=session.project_path)
 
@@ -66,8 +61,6 @@ async def _send_proactive_message(
     except Exception as e:
         logger.warning(f"Proactive Claude call failed: {e}")
         return
-    finally:
-        await claude.disconnect()
 
     if not response or not response.strip():
         return

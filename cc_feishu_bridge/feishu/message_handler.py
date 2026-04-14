@@ -168,21 +168,16 @@ class MessageHandler:
                 pass
         return HandlerResult(success=True)
 
-    async def _ensure_connected(
+    def _init_options(
         self,
         system_prompt_append: str | None = None,
+        continue_conversation: bool = True,
     ) -> None:
         """
-        确保 CLI 进程已连接。
-
-        - 如果尚未连接，建立连接
-        - 如果 system prompt 已过期（dirty flag），断开重连
+        初始化/更新持久化 options。
+        system prompt 更新只需重新调用此方法。
         """
-        if self.claude._system_prompt_dirty:  # type: ignore[attr-defined]
-            logger.info(
-                f"[_ensure_connected] CLI reconnecting, dirty={self.claude._system_prompt_dirty!r}"  # type: ignore[attr-defined]
-            )
-        await self.claude.ensure_connected(system_prompt_append)
+        self.claude._init_options(system_prompt_append, continue_conversation)
 
     async def _worker_loop(self) -> None:
         """串行出队并处理消息。"""
@@ -245,8 +240,8 @@ class MessageHandler:
             + self.memory_manager.inject_context(user_open_id=message.user_open_id)
         )
 
-        # 确保 CLI 进程已连接（持久化 client）
-        await self._ensure_connected(system_prompt_append)
+        # 确保 options 已初始化
+        self._init_options(system_prompt_append)
 
         await self._run_query(message, session)
 
@@ -257,13 +252,12 @@ class MessageHandler:
         arg = parts[1] if len(parts) > 1 else ""
 
         if cmd == "/new":
-            # 关闭旧 CLI 进程，启动全新 session
-            await self.claude.disconnect()
+            # 重置 options，continue_conversation=False 启动全新 session
             session = self.sessions.create_session(
                 message.user_open_id,
                 self.approved_directory,
             )
-            await self.claude.connect()  # 启动全新 session
+            self._init_options(continue_conversation=False)
             return HandlerResult(
                 success=True,
                 response_text=f"✅ 新会话已创建\n会话ID: {session.session_id}\n工作目录: {session.project_path}",
@@ -964,18 +958,9 @@ class MessageHandler:
             await self._safe_send(message.chat_id, message.message_id, "🛑 已打断 Claude。")
         except Exception as e:
             logger.exception(f"Error in _run_query: {e}")
-            # CLI 进程异常崩溃，尝试重新连接后重试一次
-            reconnect_attempted = False
-            if not self.claude.is_connected():
-                logger.info("[_run_query] CLI died, attempting reconnect")
-                try:
-                    await self.claude.connect()
-                    reconnect_attempted = True
-                except Exception as reconnect_err:
-                    logger.warning(f"[_run_query] reconnect failed: {reconnect_err}")
+            # CLI 进程异常崩溃，每次 query 内部创建新 client，下一次自动恢复
+            logger.warning(f"[_run_query] CLI error: {e}")
             error_msg = f"⚠️ 内部错误：{e}"
-            if reconnect_attempted:
-                error_msg += "（CLI 已重连，将重试）"
             await self._safe_send(message.chat_id, message.message_id, error_msg)
         finally:
             if reaction_id:
