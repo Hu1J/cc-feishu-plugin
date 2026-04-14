@@ -36,11 +36,9 @@ class ClaudeIntegration:
         self.max_turns = max_turns
         self.approved_directory = approved_directory
         self._options: Any = None  # 持久化的 ClaudeAgentOptions
-        self._client: Any = None  # 临时引用，当前 query 的 client
-        self._consume_task: asyncio.Task | None = None
         self._system_prompt_append: str | None = None
         self._query_lock = asyncio.Lock()  # 保证同一时间只有一个 query 在执行
-        self._interrupt_lock = asyncio.Lock()  # 保证 interrupt 不能重入
+        self.stop_event = asyncio.Event()  # /stop 信号，listener 收到后 interrupt
 
     def mark_system_prompt_stale(self) -> None:
         """标记 system prompt 已过期，下次 query 时重新初始化。"""
@@ -98,8 +96,8 @@ class ClaudeIntegration:
     ) -> tuple[str, str | None, float]:
         """
         每个 query 内部创建独立 client，用完即销毁。
-        receive_response() 消费逻辑包进 _consume() 异步函数，
-        用 asyncio.create_task 启动，interrupt 时可单独 cancel。
+        启动时额外创建一个 listener 协程监听 stop_event，
+        收到 /stop 信号时立即 interrupt 并 await consume_task。
         """
         if self._options is None:
             raise RuntimeError(
@@ -110,16 +108,15 @@ class ClaudeIntegration:
 
         async with self._query_lock:
             t_query = time_module.time()
+            self.stop_event.clear()
+
             # 每次 query 创建新 client，用完即销毁
             from claude_agent_sdk import ClaudeSDKClient
             async with ClaudeSDKClient(options=self._options) as client:
-                # 临时持有 client，让 interrupt_current() 能访问
-                self._client = client
-
                 # 发送 prompt
                 await client.query(prompt=prompt)
 
-                # 后台消费任务（和官方示例一致）
+                # 后台消费任务
                 async def _consume():
                     result_text = ""
                     result_session_id = None
@@ -141,33 +138,21 @@ class ClaudeIntegration:
                                 await on_stream(parsed)
                     return (result_text, result_session_id, result_cost)
 
-                self._consume_task = asyncio.create_task(_consume())
-                result = await self._consume_task
+                consume_task = asyncio.create_task(_consume())
 
-            # async with 退出后 client 已销毁，清除引用
-            self._client = None
-            self._consume_task = None
+                # Listener：监听 stop_event，收到信号时 interrupt
+                async def _listener():
+                    await self.stop_event.wait()
+                    await client.interrupt()
+                    await consume_task
+                    logger.info("[listener] stop handling done")
+
+                listener_task = asyncio.create_task(_listener())
+                try:
+                    result = await consume_task
+                finally:
+                    listener_task.cancel()
             return result
-
-    # -------------------------------------------------------------------------
-    # Interrupt
-    # -------------------------------------------------------------------------
-
-    async def interrupt_current(self) -> bool:
-        """
-        和官方示例完全对齐：interrupt + await consume_task。
-        两个锁都保留：_query_lock 保证同一时间只有一个 query，
-        _interrupt_lock 保证 interrupt 不重入。
-        """
-        if self._client is None:
-            return False
-
-        async with self._interrupt_lock:
-            await self._client.interrupt()
-            if self._consume_task is not None:
-                await self._consume_task
-            logger.info("[interrupt_current] done")
-            return True
 
     # -------------------------------------------------------------------------
     # Helpers

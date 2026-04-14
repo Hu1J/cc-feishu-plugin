@@ -977,7 +977,7 @@ class MessageHandler:
         if self._worker_task is not None and not self._worker_task.done():
             self._worker_task.cancel()
             self._worker_task = None
-        await self.claude.interrupt_current()
+        self.claude.stop_event.set()
         await self._safe_send(message.chat_id, message.message_id, "🛑 已打断 Claude，当前任务已停止。")
         return HandlerResult(success=True)
 
