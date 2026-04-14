@@ -4,7 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.3.23] - 2026-04-14
+## [Unreleased]
+
+### Changed
+- **SDK 版本要求**：升级 `claude-agent-sdk` 最低版本要求到 `>=0.1.59`
+
+## [0.3.24] - 2026-04-14
 
 ### Fixed
 - **主动推送重复发送**：修复同一用户多个 session 时会收到多次推送的问题，按 chat_id 去重
