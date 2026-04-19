@@ -6,6 +6,26 @@ Claude Code 飞书桥接插件 — 在飞书中与本地 Claude Code 对话。
 
 - `/new` — 创建新会话
 - `/status` — 查看当前会话状态（会话 ID、消息数、累计费用、工作目录）
+
+## 群聊支持
+
+机器人支持飞书群聊 @CC 交互：
+
+- **@CC 响应**：群聊中 @机器人 才能触发回复（避免刷屏）
+- **上下文感知**：@CC 消息自动注入最近 20 条群聊历史，Claude 理解讨论背景
+- **命令支持**：`@_user_1 /git`、`@_user_1 /status` 等带 mention 前缀的命令正常识别
+- **自动注册**：新群首次 @CC 时自动注册到 `config.yaml`，默认 require_mention=True
+- **per-group 配置**：可按群配置 `enabled`（启用/禁用）、`require_mention`（是否必须 @）、`allow_from`（白名单）
+
+示例 `config.yaml` 配置：
+```yaml
+feishu:
+  groups:
+    oc_xxxxxxxxxxx:
+      enabled: true
+      require_mention: true   # 设为 false 则响应所有群消息
+      allow_from: []          # 非空时只响应指定用户
+```
 - `/stop` — 打断 Claude 当前正在执行的查询
 - `/git` — 显示当前项目 git status 和最近 5 次提交（工作区干净时也显示提交历史）
 - `/switch <目录>` — 切换到另一个项目的 bridge 实例

@@ -291,7 +291,7 @@ class MessageHandler:
         # Group chat: record ALL messages to history (even without @mention)
         # so the bot has context when someone finally @mentions it.
         if message.is_group_chat and message.content:
-            # Truncate content to 200 chars to keep history manageable
+            # Store full content in history
             content = message.content
             hist = self._group_history.setdefault(message.chat_id, [])
             hist.append(f"{message.user_open_id}: {content}")

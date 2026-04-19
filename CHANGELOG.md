@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-19
+
+### Added
+
+- **群聊支持**：机器人现在支持飞书群聊 @
+  - 自动识别群聊消息（`chat_type === 'group'`）
+  - 自动探测 bot_open_id：启动时调用 `/open-apis/bot/v1/openclaw_bot/ping` API，无需手动配置
+  - 所有群消息记录到内存（最近 20 条），@CC 时注入上下文让 AI 理解讨论背景
+  - `@_user_1 /command` 格式的命令识别（mention 前缀自动剥离）
+  - per-group 访问控制：`enabled`、`require_mention`、`allow_from` 三级配置
+  - 新群自动注册到 `config.yaml`，默认 require_mention=True
+  - 群聊 session 按 `user_id + chat_id` 隔离，与 P2P session 分开
+
+### Changed
+
+- `IncomingMessage` 新增字段：`is_group_chat`、`chat_type`、`mention_bot`、`mention_ids`、`group_name`
+- `FeishuConfig` 新增字段：`bot_open_id`、`groups`
+
+### Fixed
+
+- **群聊命令识别**：修复 `@_user_1 /git` 因 mention 前缀导致斜杠命令无法识别的问题
+- **session_id 碰撞**：同一秒创建的多个 session 因 UUID 后缀导致碰撞 → 已修复
+
 ## [0.3.24] - 2026-04-14
 
 ### Changed
