@@ -250,6 +250,7 @@ def start_bridge(config_path: str, data_dir: str) -> None:
         app_id=config.feishu.app_id,
         app_secret=config.feishu.app_secret,
         bot_name=config.feishu.bot_name,
+        bot_open_id=config.feishu.bot_open_id,
         domain=config.feishu.domain,
         on_message=lambda msg: handle_message(msg, handler),
     )

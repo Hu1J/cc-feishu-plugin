@@ -95,12 +95,14 @@ class FeishuWSClient:
         app_id: str,
         app_secret: str,
         bot_name: str = "Claude",
+        bot_open_id: str = "",
         domain: str = "feishu",
         on_message: MessageCallback | None = None,
     ):
         self.app_id = app_id
         self.app_secret = app_secret
         self.bot_name = bot_name
+        self.bot_open_id = bot_open_id
         self.domain = domain
         self._on_message = on_message
         self._ws_client = None
@@ -149,6 +151,25 @@ class FeishuWSClient:
                 if sender_id is not None:
                     user_open_id = getattr(sender_id, "open_id", "")
 
+                # Extract chat_type: 'p2p' or 'group' (from official plugin)
+                chat_type = str(getattr(message, "chat_type", "p2p") or "p2p")
+                is_group_chat = chat_type == "group"
+
+                # Extract mentions[] to determine if bot was @mentioned
+                # Each mention: { key: "@_user_1", id: { open_id: "ou_xxx", ... }, name: "Alice" }
+                mention_ids: list[str] = []
+                mention_bot = False
+                mentions = getattr(message, "mentions", None)
+                if mentions:
+                    for m in mentions:
+                        mid = getattr(m, "id", None)
+                        if mid is not None:
+                            open_id = getattr(mid, "open_id", "") or ""
+                            if open_id:
+                                mention_ids.append(open_id)
+                                if open_id == self.bot_open_id:
+                                    mention_bot = True
+
                 incoming = IncomingMessage(
                     message_id=getattr(message, "message_id", ""),
                     chat_id=getattr(message, "chat_id", ""),
@@ -159,6 +180,11 @@ class FeishuWSClient:
                     parent_id=getattr(message, "parent_id", ""),
                     thread_id=getattr(message, "thread_id", ""),
                     raw_content=content_str,
+                    is_group_chat=is_group_chat,
+                    chat_type=chat_type,
+                    mention_bot=mention_bot,
+                    mention_ids=mention_ids,
+                    group_name=str(getattr(message, "chat_name", "") or ""),
                 )
                 logger.info(f"Received message from {user_open_id}: type={msg_type!r} parent_id={getattr(message, 'parent_id', '')!r} raw_content={content_str!r}")
                 try:

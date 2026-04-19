@@ -13,6 +13,7 @@ class FeishuConfig:
     app_id: str
     app_secret: str
     bot_name: str = "Claude"
+    bot_open_id: str = ""        # 机器人的 open_id，用于检测群聊 @CC
     domain: str = "feishu"
 
 
@@ -105,6 +106,7 @@ def load_config(path: str, data_dir: str = "") -> Config:
 
 def save_config(path: str, feishu_app_id: str, feishu_app_secret: str,
                 domain: str, bot_name: str,
+                bot_open_id: str,
                 allowed_users: list[str],
                 claude_cli_path: str, claude_max_turns: int,
                 claude_approved_directory: str,
@@ -116,6 +118,7 @@ def save_config(path: str, feishu_app_id: str, feishu_app_secret: str,
             "app_id": feishu_app_id,
             "app_secret": feishu_app_secret,
             "bot_name": bot_name,
+            "bot_open_id": bot_open_id,
             "domain": domain,
         },
         "auth": {

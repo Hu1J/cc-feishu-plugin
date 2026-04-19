@@ -64,6 +64,7 @@ def save_config(result: AppRegistrationResult, config_path: str, bypass_accepted
             "app_id": result.app_id,
             "app_secret": result.app_secret,
             "bot_name": "Claude",
+            "bot_open_id": "",  # 群聊 @CC 检测用，可后续手动填写或自动获取
             "domain": result.domain,
         },
         "auth": {
