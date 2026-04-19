@@ -102,11 +102,54 @@ class FeishuWSClient:
         self.app_id = app_id
         self.app_secret = app_secret
         self.bot_name = bot_name
-        self.bot_open_id = bot_open_id
+        self._configured_bot_open_id = bot_open_id
         self.domain = domain
         self._on_message = on_message
         self._ws_client = None
         self._handler = None
+        self._probed_bot_open_id: str | None = None
+
+    @property
+    def bot_open_id(self) -> str:
+        """Returns configured bot_open_id, falling back to auto-probed value."""
+        return self._configured_bot_open_id or self._probed_bot_open_id or ""
+
+    def probe_bot_info(self) -> str | None:
+        """Probe bot identity via the /open-apis/bot/v1/openclaw_bot/ping API.
+
+        Auto-discovers the bot's own open_id without requiring manual config.
+        Updates _probed_bot_open_id on success.
+
+        Returns the bot's open_id on success, None on failure.
+        """
+        from lark_oapi.core.model.base_request import BaseRequest
+        from lark_oapi.core import HttpMethod, AccessTokenType
+
+        client = lark.Client.builder().app_id(self.app_id).app_secret(self.app_secret).build()
+        request = (
+            BaseRequest.builder()
+            .http_method(HttpMethod.POST)
+            .uri("/open-apis/bot/v1/openclaw_bot/ping")
+            .token_types({AccessTokenType.APP})
+            .body({"needBotInfo": True})
+            .build()
+        )
+        try:
+            resp = client.request(request)
+            if resp.code == 0 and resp.raw and resp.raw.content:
+                import json
+                raw_body = json.loads(resp.raw.content)
+                data = raw_body.get("data") or {}
+                bot_info = data.get("pingBotInfo") or data.get("ping_bot_info") or {}
+                bot_id = bot_info.get("botID") or bot_info.get("bot_id")
+                if bot_id:
+                    self._probed_bot_open_id = bot_id
+                    logger.info(f"Auto-probed bot_open_id: {self._probed_bot_open_id}")
+                    return self._probed_bot_open_id
+            logger.warning(f"bot probe API failed: code={resp.code} msg={getattr(resp, 'msg', '')}")
+        except Exception as e:
+            logger.warning(f"bot probe API error: {e}")
+        return None
 
     def _build_event_handler(self):
         """Build EventDispatcherHandler with p2p message callback registered."""
@@ -159,16 +202,27 @@ class FeishuWSClient:
                 # Each mention: { key: "@_user_1", id: { open_id: "ou_xxx", ... }, name: "Alice" }
                 mention_ids: list[str] = []
                 mention_bot = False
-                mentions = getattr(message, "mentions", None)
-                if mentions:
-                    for m in mentions:
-                        mid = getattr(m, "id", None)
-                        if mid is not None:
-                            open_id = getattr(mid, "open_id", "") or ""
-                            if open_id:
-                                mention_ids.append(open_id)
-                                if open_id == self.bot_open_id:
-                                    mention_bot = True
+                if not self.bot_open_id:
+                    # bot_open_id not configured — group @mention detection is unavailable.
+                    # Log a warning once per process lifetime to alert the operator.
+                    # Once is enough: either it's configured or it isn't.
+                    if is_group_chat and not hasattr(self, "_bot_open_id_warned"):
+                        logger.warning(
+                            "bot_open_id is not set in config.yaml — group @mention detection "
+                            "will not work. Set feishu.bot_open_id to enable group chat @CC."
+                        )
+                        self._bot_open_id_warned = True
+                else:
+                    mentions = getattr(message, "mentions", None)
+                    if mentions:
+                        for m in mentions:
+                            mid = getattr(m, "id", None)
+                            if mid is not None:
+                                open_id = getattr(mid, "open_id", "") or ""
+                                if open_id:
+                                    mention_ids.append(open_id)
+                                    if open_id == self.bot_open_id:
+                                        mention_bot = True
 
                 incoming = IncomingMessage(
                     message_id=getattr(message, "message_id", ""),
@@ -216,6 +270,10 @@ class FeishuWSClient:
         """Start the WebSocket long connection (blocking)."""
         if self._ws_client is not None:
             return
+
+        # Auto-probe bot identity so mention detection works without manual config.
+        if not self._configured_bot_open_id:
+            self.probe_bot_info()
 
         self._handler = self._build_event_handler()
         base_url = "https://open.feishu.cn" if self.domain == "feishu" else "https://open.larksuite.com"

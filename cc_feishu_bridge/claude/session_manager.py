@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -124,7 +125,7 @@ class SessionManager:
         """
         now = datetime.utcnow()
         session = Session(
-            session_id=f"session_{now.strftime('%Y%m%d%H%M%S')}",
+            session_id=f"session_{now.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}",
             sdk_session_id=sdk_session_id,
             user_id=user_id,
             project_path=project_path,

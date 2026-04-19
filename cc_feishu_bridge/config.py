@@ -106,8 +106,13 @@ def load_config(path: str, data_dir: str = "") -> Config:
         raw = yaml.safe_load(f)
 
     # Deserialize groups: convert raw dicts to GroupConfigEntry objects
+    # Filter out unknown fields to tolerate future config additions gracefully.
+    _known_group_keys = {"enabled", "require_mention", "allow_from"}
     raw_groups = raw.get("feishu", {}).get("groups", {})
-    groups = {gid: GroupConfigEntry(**gentry) for gid, gentry in raw_groups.items()}
+    groups = {
+        gid: GroupConfigEntry(**{k: v for k, v in gentry.items() if k in _known_group_keys})
+        for gid, gentry in raw_groups.items()
+    }
 
     feishu_raw = raw.get("feishu", {}).copy()
     feishu_raw["groups"] = groups
@@ -132,16 +137,27 @@ def save_config(path: str, feishu_app_id: str, feishu_app_secret: str,
                 claude_cli_path: str, claude_max_turns: int,
                 claude_approved_directory: str,
                 storage_db_path: str,
-                bypass_accepted: bool = False) -> None:
+                bypass_accepted: bool = False,
+                groups: dict | None = None) -> None:
     """Save a complete config to a YAML file."""
+    feishu_cfg = {
+        "app_id": feishu_app_id,
+        "app_secret": feishu_app_secret,
+        "bot_name": bot_name,
+        "bot_open_id": bot_open_id,
+        "domain": domain,
+    }
+    if groups:
+        feishu_cfg["groups"] = {
+            gid: {
+                "enabled": entry.enabled,
+                "require_mention": entry.require_mention,
+                "allow_from": entry.allow_from,
+            }
+            for gid, entry in groups.items()
+        }
     config = {
-        "feishu": {
-            "app_id": feishu_app_id,
-            "app_secret": feishu_app_secret,
-            "bot_name": bot_name,
-            "bot_open_id": bot_open_id,
-            "domain": domain,
-        },
+        "feishu": feishu_cfg,
         "auth": {
             "allowed_users": allowed_users,
         },
@@ -180,7 +196,13 @@ def register_group_config(config_path: str, group_id: str, entry: GroupConfigEnt
     with open(config_path) as f:
         raw = yaml.safe_load(f)
 
-    groups = raw.get("feishu", {}).get("groups", {})
+    feishu_section = raw.get("feishu")
+    if feishu_section is None:
+        # Config file has no feishu section — create it with a groups subkey
+        raw["feishu"] = {"groups": {}}
+        feishu_section = raw["feishu"]
+
+    groups = feishu_section.get("groups", {})
     if group_id in groups:
         return False  # already registered
 
@@ -189,7 +211,7 @@ def register_group_config(config_path: str, group_id: str, entry: GroupConfigEnt
         "require_mention": entry.require_mention,
         "allow_from": entry.allow_from,
     }
-    raw["feishu"]["groups"] = groups
+    feishu_section["groups"] = groups
 
     with open(config_path, "w") as f:
         yaml.dump(raw, f, default_flow_style=False, allow_unicode=True)

@@ -32,6 +32,16 @@ def _is_command(text: str) -> bool:
     return bool(_COMMAND_RE.match(text))
 
 
+def _strip_mention_prefix(content: str) -> str:
+    """Strip @_user_N prefix from message content if present.
+
+    When a user sends '@_user_1 /git' in group chat, the content starts with
+    the mention. This removes the mention so the underlying command is visible.
+    """
+    # Match @_user_N followed by optional whitespace
+    return re.sub(r"^@_user_\d+\s*", "", content)
+
+
 @dataclass
 class HandlerResult:
     success: bool
@@ -125,6 +135,8 @@ class MessageHandler:
         self.memory_manager.set_system_prompt_stale_callback(self.claude.mark_system_prompt_stale)
         self._queue: asyncio.Queue[IncomingMessage] | None = None
         self._queue_loop_id: int | None = None
+        # Group chat history: chat_id -> list of recent message contents (max 20)
+        self._group_history: dict[str, list[str]] = {}
         self._worker_task: asyncio.Task | None = None
         self._is_processing: bool = False  # True while worker is running or about to run
         self._current_message_id: str = ""
@@ -170,6 +182,11 @@ class MessageHandler:
         if not message.is_group_chat:
             return True
 
+        # Reject malformed messages with empty chat_id — not a valid group
+        if not message.chat_id:
+            logger.warning(f"Group chat message has empty chat_id, skipping")
+            return False
+
         group_cfg = self._get_group_config(message.chat_id)
 
         # If group is explicitly disabled, skip
@@ -200,7 +217,9 @@ class MessageHandler:
         注意：所有命令（/开头）都不入队，直接处理以确保立即响应。
         """
         # Commands are handled immediately — do not queue
-        if message.content.startswith("/") and _is_command(message.content):
+        # Strip @mention prefix so '@_user_1 /git' is recognized as /git command
+        content = _strip_mention_prefix(message.content)
+        if content.startswith("/") and _is_command(content):
             # Authenticate first
             auth_result = self.auth.authenticate(message.user_open_id)
             if not auth_result.authorized:
@@ -269,6 +288,16 @@ class MessageHandler:
             logger.info(f"Ignoring message from unauthorized user: {message.user_open_id}")
             return
 
+        # Group chat: record ALL messages to history (even without @mention)
+        # so the bot has context when someone finally @mentions it.
+        if message.is_group_chat and message.content:
+            # Truncate content to 200 chars to keep history manageable
+            content = message.content
+            hist = self._group_history.setdefault(message.chat_id, [])
+            hist.append(f"{message.user_open_id}: {content}")
+            if len(hist) > 20:
+                hist[:] = hist[-20:]
+
         # Group chat: skip if bot was not @mentioned (no response to avoid spam)
         # Group access control check (per-group config: enabled, allow_from, require_mention)
         if not self._check_group_access(message):
@@ -292,7 +321,15 @@ class MessageHandler:
         # from p2p sessions. For p2p, use the standard user-level session.
         if message.is_group_chat:
             session = self.sessions.get_active_session_for_chat(message.user_open_id, message.chat_id)
-            if session and session.chat_id != message.chat_id:
+            if session is None:
+                # First message in this group chat — create a new session
+                session = self.sessions.create_session(
+                    message.user_open_id,
+                    self.approved_directory,
+                    chat_id=message.chat_id,
+                )
+            elif session.chat_id != message.chat_id:
+                # Same user in a different group — update session to point to new chat
                 self.sessions.update_chat_id(message.user_open_id, message.chat_id)
         else:
             session = self.sessions.get_active_session(message.user_open_id)
@@ -315,7 +352,9 @@ class MessageHandler:
 
     async def _handle_command(self, message: IncomingMessage) -> HandlerResult:
         """Handle slash commands like /new, /status."""
-        parts = message.content.split(maxsplit=1)
+        # Strip @mention prefix so commands work in group chat with @mention
+        content = _strip_mention_prefix(message.content)
+        parts = content.split(maxsplit=1)
         cmd = parts[0].lower()
         arg = parts[1] if len(parts) > 1 else ""
 
@@ -829,7 +868,16 @@ class MessageHandler:
                     quoted_content = f"[引用消息不可用: {message.parent_id}]"
                     logger.warning(f"Failed to fetch quoted message {message.parent_id}")
 
-            prefix_parts = [p for p in [media_prompt_prefix, quoted_content] if p]
+            # Inject group chat history so the bot has context of recent messages.
+            # History was recorded for ALL group messages (including non-@mention ones).
+            group_history_prefix = ""
+            if message.is_group_chat and message.chat_id:
+                hist = self._group_history.get(message.chat_id, [])
+                if hist:
+                    history_text = "\n".join(hist)
+                    group_history_prefix = f"[群聊上下文]\n{history_text}\n\n"
+
+            prefix_parts = [p for p in [group_history_prefix, media_prompt_prefix, quoted_content] if p]
             prefix = "\n".join(prefix_parts) + "\n" if prefix_parts else ""
             # For text messages: prepend prefix to actual text content.
             # For media messages (image/file): message.content may contain user text
@@ -1004,7 +1052,7 @@ class MessageHandler:
                     message.user_open_id,
                     self.approved_directory,
                     sdk_session_id=sdk_session_id_from_query,
-                    chat_id=message.chat_id if message.is_group_chat else None,
+                    chat_id=message.chat_id,
                 )
             else:
                 self.sessions.update_session(session.session_id, cost=last_cost, message_increment=1)
