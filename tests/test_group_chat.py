@@ -371,3 +371,37 @@ class TestGroupAutoRegistration:
             assert cfg["feishu"]["groups"]["oc_brand_new_group"]["require_mention"] is True
         finally:
             os.unlink(tmp.name)
+
+
+class TestStripMentionPrefix:
+    """Test _strip_mention_prefix for @_user_N command parsing in group chat."""
+
+    def test_strips_user_mention_from_command(self):
+        """'@_user_1 /git' should become '/git'."""
+        from cc_feishu_bridge.feishu.message_handler import _strip_mention_prefix
+        assert _strip_mention_prefix("@_user_1 /git") == "/git"
+
+    def test_strips_user_mention_with_space(self):
+        """'@_user_1  hello' should become 'hello'."""
+        from cc_feishu_bridge.feishu.message_handler import _strip_mention_prefix
+        assert _strip_mention_prefix("@_user_1  hello") == "hello"
+
+    def test_passthrough_without_mention(self):
+        """Plain '/status' should pass through unchanged."""
+        from cc_feishu_bridge.feishu.message_handler import _strip_mention_prefix
+        assert _strip_mention_prefix("/status") == "/status"
+
+    def test_passthrough_plain_text(self):
+        """Plain text without mention passes through."""
+        from cc_feishu_bridge.feishu.message_handler import _strip_mention_prefix
+        assert _strip_mention_prefix("hello world") == "hello world"
+
+    def test_passthrough_empty_string(self):
+        """Empty string passes through."""
+        from cc_feishu_bridge.feishu.message_handler import _strip_mention_prefix
+        assert _strip_mention_prefix("") == ""
+
+    def test_large_user_number(self):
+        """'@_user_123456 /stop' should become '/stop'."""
+        from cc_feishu_bridge.feishu.message_handler import _strip_mention_prefix
+        assert _strip_mention_prefix("@_user_123456 /stop") == "/stop"
