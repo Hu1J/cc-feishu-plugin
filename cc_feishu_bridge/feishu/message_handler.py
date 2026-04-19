@@ -213,6 +213,11 @@ class MessageHandler:
             logger.info(f"Ignoring message from unauthorized user: {message.user_open_id}")
             return
 
+        # Group chat: skip if bot was not @mentioned (no response to avoid spam)
+        if message.is_group_chat and not message.mention_bot:
+            logger.info(f"Group chat message in {message.chat_id} without @CC mention, skipping")
+            return
+
         if message.message_type not in ("text", "image", "file"):
             await self._safe_send(message.chat_id, message.message_id, "暂不支持该消息类型，请发送文字消息。")
             return
@@ -227,9 +232,16 @@ class MessageHandler:
         #         await self._safe_send(message.chat_id, message.message_id, f"⚠️ {err}")
         #         return
 
-        session = self.sessions.get_active_session(message.user_open_id)
-        if session and session.chat_id != message.chat_id:
-            self.sessions.update_chat_id(message.user_open_id, message.chat_id)
+        # For group chat, use chat-specific session lookup to isolate group sessions
+        # from p2p sessions. For p2p, use the standard user-level session.
+        if message.is_group_chat:
+            session = self.sessions.get_active_session_for_chat(message.user_open_id, message.chat_id)
+            if session and session.chat_id != message.chat_id:
+                self.sessions.update_chat_id(message.user_open_id, message.chat_id)
+        else:
+            session = self.sessions.get_active_session(message.user_open_id)
+            if session and session.chat_id != message.chat_id:
+                self.sessions.update_chat_id(message.user_open_id, message.chat_id)
 
         project_path = session.project_path if session else self.approved_directory
         self._current_project_path = project_path  # 供 stream_callback 使用
@@ -253,9 +265,11 @@ class MessageHandler:
 
         if cmd == "/new":
             # 重置 options，continue_conversation=False 启动全新 session
+            # 群聊时传入 chat_id，确保群聊 session 与 p2p session 隔离
             session = self.sessions.create_session(
                 message.user_open_id,
                 self.approved_directory,
+                chat_id=message.chat_id if message.is_group_chat else None,
             )
             self._init_options(continue_conversation=False)
             return HandlerResult(
@@ -934,6 +948,7 @@ class MessageHandler:
                     message.user_open_id,
                     self.approved_directory,
                     sdk_session_id=sdk_session_id_from_query,
+                    chat_id=message.chat_id if message.is_group_chat else None,
                 )
             else:
                 self.sessions.update_session(session.session_id, cost=last_cost, message_increment=1)
