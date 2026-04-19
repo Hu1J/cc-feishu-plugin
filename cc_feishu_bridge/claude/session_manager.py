@@ -109,8 +109,19 @@ class SessionManager:
                 "CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at)"
             )
 
-    def create_session(self, user_id: str, project_path: str, sdk_session_id: str | None = None) -> Session:
-        """Create a new session for a user."""
+    def create_session(
+        self,
+        user_id: str,
+        project_path: str,
+        sdk_session_id: str | None = None,
+        chat_id: str | None = None,
+        thread_id: str | None = None,
+    ) -> Session:
+        """Create a new session for a user.
+
+        For group chat, pass chat_id (and optionally thread_id) to enable
+        session isolation per chat. Session key is: user_id + chat_id (+ thread_id).
+        """
         now = datetime.utcnow()
         session = Session(
             session_id=f"session_{now.strftime('%Y%m%d%H%M%S')}",
@@ -121,6 +132,7 @@ class SessionManager:
             last_used=now,
             total_cost=0.0,
             message_count=0,
+            chat_id=chat_id or "",
         )
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
@@ -131,7 +143,7 @@ class SessionManager:
                     session.session_id,
                     session.sdk_session_id,
                     session.user_id,
-                    "",   # chat_id 初始为空字符串
+                    session.chat_id,
                     session.project_path,
                     session.created_at.isoformat(),
                     session.last_used.isoformat(),
@@ -140,6 +152,39 @@ class SessionManager:
                 ),
             )
         return session
+
+    def get_active_session_for_chat(self, user_id: str, chat_id: str) -> Optional[Session]:
+        """Get the most recent session for a user in a specific chat (group or p2p).
+
+        This enables session isolation per chat — group chat sessions are separate
+        from p2p sessions even for the same user.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """SELECT * FROM sessions
+                   WHERE user_id = ? AND chat_id = ?
+                   ORDER BY last_used DESC
+                   LIMIT 1""",
+                (user_id, chat_id),
+            ).fetchone()
+        if row:
+            return Session(
+                session_id=row["session_id"],
+                sdk_session_id=row["sdk_session_id"],
+                user_id=row["user_id"],
+                chat_id=row["chat_id"],
+                project_path=row["project_path"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                last_used=datetime.fromisoformat(row["last_used"]),
+                total_cost=row["total_cost"],
+                message_count=row["message_count"],
+                last_message_at=datetime.fromisoformat(row["last_message_at"]) if row["last_message_at"] else None,
+                proactive_today_count=row["proactive_today_count"],
+                proactive_today_date=row["proactive_today_date"],
+                last_proactive_at=datetime.fromisoformat(row["last_proactive_at"]) if row["last_proactive_at"] else None,
+            )
+        return None
 
     def get_active_session(self, user_id: str) -> Optional[Session]:
         """Get the most recent session for a user."""
