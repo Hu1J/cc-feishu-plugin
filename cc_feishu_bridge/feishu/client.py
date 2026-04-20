@@ -457,6 +457,88 @@ class FeishuClient:
             logger.info(f"Replied post to {reply_to_message_id} in chat {chat_id}: {response.data.message_id}")
         return response.data.message_id
 
+    async def send_post(
+        self,
+        chat_id: str,
+        markdown_text: str,
+    ) -> str:
+        """Send a markdown message as a new message using Feishu post format.
+
+        Unlike send_post_reply, this does NOT require a reply_to_message_id —
+        it creates a new standalone message in the chat.
+        """
+        import json
+        import lark_oapi as lark
+        client = self._get_client()
+        content_payload = json.dumps({
+            "zh_cn": {
+                "content": [[{"tag": "md", "text": markdown_text}]]
+            }
+        })
+        request = (
+            lark.im.v1.CreateMessageRequest.builder()
+            .receive_id_type("chat_id")
+            .request_body(
+                lark.im.v1.CreateMessageRequestBody.builder()
+                .receive_id(chat_id)
+                .content(content_payload)
+                .msg_type("post")
+                .build()
+            )
+            .build()
+        )
+        response = await asyncio.to_thread(client.im.v1.message.create, request)
+        if not response.success():
+            raise RuntimeError(f"Failed to send post: {response.msg}")
+        logger.info(f"Sent post to chat {chat_id}: {response.data.message_id}")
+        return response.data.message_id
+
+    async def send_interactive_card(
+        self,
+        chat_id: str,
+        markdown_text: str,
+    ) -> str:
+        """Send a markdown message as a new Feishu Interactive Card.
+
+        Used for content with fenced code blocks or tables that benefit from
+        the wide-screen card layout. Creates a new standalone message.
+        """
+        card = {
+            "schema": "2.0",
+            "config": {"wide_screen_mode": True},
+            "body": {
+                "elements": [{"tag": "markdown", "content": markdown_text}]
+            }
+        }
+        return await self.send_card(chat_id, card)
+
+    async def send_card(
+        self,
+        chat_id: str,
+        card: dict,
+    ) -> str:
+        """Send an interactive card as a new standalone message (no reply_id needed)."""
+        import json
+        import lark_oapi as lark
+        client = self._get_client()
+        request = (
+            lark.im.v1.CreateMessageRequest.builder()
+            .receive_id_type("chat_id")
+            .request_body(
+                lark.im.v1.CreateMessageRequestBody.builder()
+                .receive_id(chat_id)
+                .content(json.dumps(card))
+                .msg_type("interactive")
+                .build()
+            )
+            .build()
+        )
+        response = await asyncio.to_thread(client.im.v1.message.create, request)
+        if not response.success():
+            raise RuntimeError(f"Failed to send card: {response.msg}")
+        logger.info(f"Sent card to chat {chat_id}: {response.data.message_id}")
+        return response.data.message_id
+
     async def send_interactive_reply(
         self,
         chat_id: str,
