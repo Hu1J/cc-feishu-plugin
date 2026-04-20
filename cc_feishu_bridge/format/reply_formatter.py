@@ -314,15 +314,15 @@ class ReplyFormatter:
                         else:
                             entries = []
                     else:
-                        # user scope
+                        # user scope — mirror memory_tools.py fallback: empty user_open_id → get all
                         if user_open_id:
                             prefs = memory_manager.get_preferences_by_user(user_open_id)
                             if card_type == "search" and query:
                                 prefs = memory_manager.search_preferences(query, user_open_id)
-                            entries = [{"id": p.id, "title": p.title,
-                                        "content": p.content, "keywords": p.keywords} for p in prefs]
                         else:
-                            entries = []
+                            prefs = memory_manager.get_all_preferences()
+                        entries = [{"id": p.id, "title": p.title,
+                                    "content": p.content, "keywords": p.keywords} for p in prefs]
                 except Exception:
                     entries = []
 
