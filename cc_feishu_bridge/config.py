@@ -47,6 +47,10 @@ class StorageConfig:
     db_path: str = "./data/sessions.db"
 
 
+@dataclass
+class SkillNudgeConfig:
+    enabled: bool = True
+    interval: int = 10
 
 
 @dataclass
@@ -55,6 +59,7 @@ class Config:
     auth: AuthConfig
     claude: ClaudeConfig
     storage: StorageConfig
+    skill_nudge: SkillNudgeConfig = field(default_factory=SkillNudgeConfig)
     data_dir: str = ""
     bypass_accepted: bool = False
 
@@ -100,6 +105,7 @@ def load_config(path: str, data_dir: str = "") -> Config:
         auth=AuthConfig(**raw.get("auth", {})),
         claude=ClaudeConfig(**raw.get("claude", {})),
         storage=StorageConfig(**raw.get("storage", {})),
+        skill_nudge=SkillNudgeConfig(**raw.get("skill_nudge", {})),
         data_dir=data_dir,
         bypass_accepted=raw.get("bypass_accepted", False),
     )

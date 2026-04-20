@@ -36,6 +36,123 @@ from cc_feishu_bridge.claude.cron_tools import set_cron_scheduler
 logger = logging.getLogger(__name__)
 
 
+def _build_skill_review_prompt(skills: list[dict]) -> str:
+    """Build the skill review prompt from a list of skill summaries."""
+    lines = [
+        "你是一个 Skill 优化专家。请审查以下所有 Skills，对每个 Skill 给出优化建议。\n",
+    ]
+    for s in skills:
+        lines.append(f"## Skill: {s['name']}")
+        lines.append(f"路径: {s['path']}")
+        lines.append(f"描述: {s['description']}")
+        lines.append(f"作者: {s.get('author', '(未知)')}")
+        lines.append(f"正文:\n{s['body'][:2000]}")
+        lines.append("---")
+    lines.append("\n请对每个 Skill 分析：")
+    lines.append("1. instructions 是否清晰准确？")
+    lines.append("2. 是否有过时信息？")
+    lines.append("3. 能否更简洁？")
+    lines.append("4. 综合评分（1-10）和优化建议\n")
+    lines.append("格式：对每个 Skill 输出\n**Skill名**: 评分 | 优化建议（50字内）")
+    return "\n".join(lines)
+
+
+def _register_skill_optimization_job(data_dir: str, scheduler) -> None:
+    """Register a daily skill optimization scan job.
+
+    Scans ~/.claude/skills/ for all SKILL.md files, builds a review prompt,
+    and creates a cron job that delivers results to the active user's chat.
+    """
+    import os
+    from pathlib import Path
+
+    skills_dir = Path.home() / ".claude" / "skills"
+    if not skills_dir.exists():
+        logger.info("[skill_optimize] skills dir not found, skipping")
+        return
+
+    skill_summaries = []
+    for skill_md in skills_dir.rglob("SKILL.md"):
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        # Parse frontmatter
+        name = skill_md.parent.name
+        description = ""
+        author = ""
+        body = content
+
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                fm_text, _, body = parts
+                for line in fm_text.splitlines():
+                    if line.startswith("name:"):
+                        name = line.split("name:", 1)[1].strip()
+                    elif line.startswith("description:"):
+                        description = line.split("description:", 1)[1].strip()
+                    elif line.startswith("author:"):
+                        author = line.split("author:", 1)[1].strip()
+
+        skill_summaries.append({
+            "name": name,
+            "path": str(skill_md),
+            "description": description,
+            "author": author,
+            "body": body.strip(),
+        })
+
+    if not skill_summaries:
+        logger.info("[skill_optimize] no skills found, skipping")
+        return
+
+    prompt = _build_skill_review_prompt(skill_summaries)
+
+    # Get chat_id from active session
+    from cc_feishu_bridge.cron_scheduler import create_job
+    chat_id = _get_active_chat_id(data_dir)
+    if not chat_id:
+        logger.info("[skill_optimize] no active chat_id, skipping")
+        return
+
+    try:
+        create_job(
+            prompt=(
+                "【Skill 优化扫描】\n\n"
+                "以下是你目前所有的 Skills，请进行全面审查并给出优化建议。\n\n"
+                + prompt
+            ),
+            schedule="0 9 * * *",  # 每天早上9点
+            chat_id=chat_id,
+            name="Skill 优化扫描",
+            repeat=None,
+            data_dir=data_dir,
+        )
+        logger.info(f"[skill_optimize] registered daily scan for {len(skill_summaries)} skills")
+    except Exception as e:
+        logger.warning(f"[skill_optimize] failed to register: {e}")
+
+
+def _get_active_chat_id(data_dir: str) -> str | None:
+    """Get the most recent active session's chat_id."""
+    db_path = os.path.join(data_dir, "sessions.db")
+    if not os.path.exists(db_path):
+        return None
+    try:
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT chat_id FROM sessions WHERE chat_id IS NOT NULL ORDER BY last_used DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        return row["chat_id"] if row else None
+    except Exception:
+        return None
+
+
 class _SafeStreamHandler(logging.StreamHandler):
     """StreamHandler that silently ignores UnicodeEncodeError on Windows GBK consoles."""
 
@@ -92,6 +209,10 @@ def create_handler(config, data_dir: str, config_path: str | None = None) -> Mes
     session_manager = SessionManager(db_path=db_path)
     formatter = ReplyFormatter()
 
+    # Initialize Hermes-style skill nudge
+    from cc_feishu_bridge.skill_nudge import make_nudge
+    skill_nudge = make_nudge(config.skill_nudge)
+
     handler = MessageHandler(
         feishu_client=feishu,
         authenticator=authenticator,
@@ -103,6 +224,7 @@ def create_handler(config, data_dir: str, config_path: str | None = None) -> Mes
         data_dir=data_dir,
         feishu_groups=config.feishu.groups,
         config_path=config_path,
+        skill_nudge=skill_nudge,
     )
     return handler
 
@@ -278,6 +400,9 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     cron_scheduler = CronScheduler(config, data_dir)
     set_cron_scheduler(cron_scheduler, config)
     cron_scheduler.start()
+
+    # Register daily skill optimization scan
+    _register_skill_optimization_job(data_dir, cron_scheduler)
 
     # CLI 进程在第一条消息到达时才会建立连接（_ensure_connected 懒加载）。
     # SDK 通过 continue_conversation=True 自动维护 session，无需手动 fork。

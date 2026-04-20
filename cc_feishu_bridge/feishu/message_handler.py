@@ -7,6 +7,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from cc_feishu_bridge.feishu.client import FeishuClient, IncomingMessage
 from cc_feishu_bridge.security.auth import Authenticator
@@ -16,6 +17,7 @@ from cc_feishu_bridge.claude.memory_manager import get_memory_manager, MEMORY_SY
 from cc_feishu_bridge.claude.feishu_file_tools import FEISHU_FILE_GUIDE
 from cc_feishu_bridge.claude.cron_tools import CRON_SYSTEM_GUIDE
 from cc_feishu_bridge.claude.session_manager import SessionManager
+from cc_feishu_bridge.skill_nudge import SkillNudge, trigger_skill_review
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 from cc_feishu_bridge.format.edit_diff import _DiffMarker, _MemoryCardMarker
 from cc_feishu_bridge.format.questionnaire_card import _AskUserQuestionMarker, format_questionnaire_card
@@ -119,6 +121,7 @@ class MessageHandler:
         data_dir: str = "",
         feishu_groups: dict | None = None,
         config_path: str | None = None,
+        skill_nudge: SkillNudge | None = None,
     ):
         self.feishu = feishu_client
         self.auth = authenticator
@@ -134,6 +137,8 @@ class MessageHandler:
         self._config_path = config_path
         self.memory_manager = get_memory_manager()
         self.memory_manager.set_system_prompt_stale_callback(self.claude.mark_system_prompt_stale)
+        self._skill_nudge = skill_nudge
+        self._pending_memory_suggestion: str | None = None  # set by _trigger_memory_review
         self._queue: asyncio.Queue[IncomingMessage] | None = None
         self._queue_loop_id: int | None = None
         # Group chat history: chat_id -> list of recent message contents (max 20)
@@ -158,6 +163,92 @@ class MessageHandler:
             self._queue = asyncio.Queue()
             self._queue_loop_id = current_loop_id
         return self._queue
+
+    def _trigger_memory_review(self, message: IncomingMessage, response_text: str) -> None:
+        """Ask the user if they want to update memory based on this conversation.
+
+        This fires after every conversation ends. It does NOT auto-write memory —
+        it asks the user first via Feishu message.
+        """
+        prompt = (
+            f"项目路径：{getattr(self, '_current_project_path', '')}\n\n"
+            f"对话刚结束，用户说：{message.content[:200]}\n\n"
+            f"Claude 的回复摘要：{response_text[:300] if response_text else '(无文本回复)'}\n\n"
+            "思考：这次对话中有没有值得记住的信息？（比如用户偏好、项目惯例、刚学到的知识点）\n"
+            "如果有必要更新记忆（MEMORY.md），请生成更新内容并告诉我具体要更新什么。\n"
+            '格式：\n- 如果需要更新记忆：直接告诉我「建议更新：xxx」\n- 如果没什么值得记住的：回复「无需更新」\n'
+        )
+
+        async def do_review():
+            try:
+                result, _, _ = await self.claude.query(prompt=prompt)
+                if result and "无需更新" not in result and "建议更新" in result:
+                    suggestion = result.strip()
+                    self._pending_memory_suggestion = suggestion
+                    await self._safe_send(
+                        message.chat_id, message.message_id,
+                        "💡 记忆更新建议：\n\n" + suggestion + "\n\n回复'确认更新'我可帮你写入记忆。",
+                    )
+            except Exception as e:
+                logger.warning(f"[_trigger_memory_review] failed: {e}")
+
+        asyncio.create_task(do_review())
+
+    def _apply_memory_update(self, message: IncomingMessage) -> None:
+        """Write the pending memory suggestion to MEMORY.md after user confirms.
+
+        Reads the stored suggestion from _pending_memory_suggestion, asks Claude
+        to format it properly, then appends/writes to the project's MEMORY.md.
+        """
+        suggestion = self._pending_memory_suggestion
+        if not suggestion:
+            asyncio.create_task(self._safe_send(
+                message.chat_id, message.message_id,
+                "没有待确认的记忆更新，上一次对话结束我没有收到任何建议。",
+            ))
+            return
+
+        project_path = getattr(self, '_current_project_path', '')
+        prompt = (
+            f"项目路径：{project_path}\n\n"
+            f"要把以下内容写入 MEMORY.md，请生成完整的更新文本（直接写入的内容，不要解释）：\n\n"
+            f"{suggestion}\n\n"
+            "要求：\n"
+            "1. 用 Markdown 格式\n"
+            "2. 包含适当的标题和内容\n"
+            "3. 直接输出要写入 MEMORY.md 的内容，不要加任何说明\n"
+        )
+
+        async def do_apply():
+            try:
+                result, _, _ = await self.claude.query(prompt=prompt)
+                if not result or result.strip() == "无需更新":
+                    await self._safe_send(message.chat_id, message.message_id, "好的，不写入记忆。")
+                    self._pending_memory_suggestion = None
+                    return
+
+                content = result.strip()
+                memory_path = Path(project_path) / "MEMORY.md"
+                existing = ""
+                if memory_path.exists():
+                    existing = memory_path.read_text(errors="replace")
+
+                # Append under a new section
+                updated = existing.rstrip() + "\n\n" + content + "\n"
+                memory_path.write_text(updated, errors="replace")
+                self._pending_memory_suggestion = None
+                await self._safe_send(
+                    message.chat_id, message.message_id,
+                    f"✅ 记忆已更新：\n\n{content[:500]}",
+                )
+            except Exception as e:
+                logger.warning(f"[_apply_memory_update] failed: {e}")
+                await self._safe_send(
+                    message.chat_id, message.message_id,
+                    f"写入记忆失败：{e}",
+                )
+
+        asyncio.create_task(do_apply())
 
     def _get_group_config(self, chat_id: str):
         """Get GroupConfigEntry for a chat_id, auto-registering if first seen."""
@@ -268,6 +359,11 @@ class MessageHandler:
             result = await self._handle_command(message)
             if result.response_text:
                 await self._safe_send(message.chat_id, message.message_id, result.response_text)
+            return HandlerResult(success=True)
+
+        # "确认更新" → 执行记忆写入
+        if content.strip() == "确认更新":
+            asyncio.create_task(self._apply_memory_update(message))
             return HandlerResult(success=True)
 
         queue = self._get_queue()
@@ -952,6 +1048,17 @@ class MessageHandler:
                         )
                         logger.info(f"[stream] tool: {claude_msg.tool_name} | input: {claude_msg.tool_input}")
 
+                        # Hermes-style skill nudge: increment tool call count
+                        nudge = self._skill_nudge
+                        if nudge and nudge.increment():
+                            # Fire-and-forget: trigger review in background, do not block stream
+                            asyncio.create_task(
+                                trigger_skill_review(
+                                    make_claude_query=lambda p: self.claude.query(prompt=p),
+                                    project_path=getattr(self, "_current_project_path", ""),
+                                )
+                            )
+
                         # _DiffMarker / list[_DiffMarker] → 彩色卡片；其他 → backtick 格式
                         if isinstance(result, _DiffMarker):
                             for card in result.card if isinstance(result.card, list) else [result.card]:
@@ -1065,6 +1172,8 @@ class MessageHandler:
 
                 # 如果这次尝试有实质内容（发了任何消息或返回了文本），认为成功，退出重试循环
                 if accumulator.sent_something or response:
+                    # Trigger memory review after conversation ends (fire-and-forget)
+                    self._trigger_memory_review(message, response or "")
                     break
 
                 # 这次尝试是空结果（cost > 0 但没有任何内容），重试
