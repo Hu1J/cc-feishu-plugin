@@ -232,8 +232,16 @@ class MessageHandler:
                 )
                 hist = self._group_history.setdefault(message.chat_id, [])
                 for msg in raw_messages:
-                    sender = msg.sender or {}
-                    user_id = sender.get("sender_id", {}).get("open_id", "") or sender.get("id", "")
+                    sender = msg.sender
+                    if sender is None:
+                        user_id = ""
+                    elif isinstance(sender, dict):
+                        sender_id = sender.get("sender_id", {}) or {}
+                        user_id = sender_id.get("open_id", "") if isinstance(sender_id, dict) else ""
+                    else:
+                        # lark-oapi Sender object — has sender_id (UserID object) and sender_type
+                        sid = getattr(sender, "sender_id", None)
+                        user_id = getattr(sid, "open_id", "") if sid is not None else ""
                     msg_content = self.feishu._extract_content(msg)
                     if msg_content:
                         hist.append(f"{user_id}: {msg_content}")

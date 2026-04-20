@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Callable, Awaitable
 from unittest.mock import MagicMock
 
@@ -198,10 +199,14 @@ class FeishuWSClient:
                 chat_type = str(getattr(message, "chat_type", "p2p") or "p2p")
                 is_group_chat = chat_type == "group"
 
-                # Extract mentions[] to determine if bot was @mentioned
+                # Extract mentions[] to determine if bot was @mentioned.
                 # Each mention: { key: "@_user_1", id: { open_id: "ou_xxx", ... }, name: "Alice" }
+                # Fallback: also check raw_content for @_user_N patterns since the mentions[]
+                # array may not be reliably populated via WebSocket (OpenClaw strategy).
                 mention_ids: list[str] = []
                 mention_bot = False
+                has_text_mention = bool(re.search(r"@_user_\d+", content_str))
+
                 if not self.bot_open_id:
                     # bot_open_id not configured — group @mention detection is unavailable.
                     # Log a warning once per process lifetime to alert the operator.
@@ -214,15 +219,26 @@ class FeishuWSClient:
                         self._bot_open_id_warned = True
                 else:
                     mentions = getattr(message, "mentions", None)
+                    # Log raw mentions for debugging
+                    logger.debug(
+                        f"[MENTION_DEBUG] is_group={is_group_chat}, mentions type={type(mentions)}, "
+                        f"value={repr(mentions)[:300]}, bot_open_id={self.bot_open_id!r}"
+                    )
                     if mentions:
                         for m in mentions:
+                            logger.debug(f"[MENTION_DEBUG] mention item: type={type(m)}, repr={repr(m)[:300]}")
                             mid = getattr(m, "id", None)
+                            logger.debug(f"[MENTION_DEBUG] mid type={type(mid)}, repr={repr(mid)[:200]}")
                             if mid is not None:
                                 open_id = getattr(mid, "open_id", "") or ""
+                                logger.debug(f"[MENTION_DEBUG] open_id={open_id!r}, bot={self.bot_open_id!r}, match={open_id == self.bot_open_id}")
                                 if open_id:
                                     mention_ids.append(open_id)
                                     if open_id == self.bot_open_id:
                                         mention_bot = True
+                    elif is_group_chat and has_text_mention:
+                        mention_bot = True
+                        logger.debug("Group @mention via content fallback")
 
                 incoming = IncomingMessage(
                     message_id=getattr(message, "message_id", ""),

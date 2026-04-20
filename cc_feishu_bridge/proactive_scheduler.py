@@ -98,6 +98,16 @@ async def _check_and_notify(
     today = now.strftime("%Y-%m-%d")
     already_notified: list = []
 
+    # Build user-level daily send count (per-user cap, not per-session)
+    user_today_count: dict[str, int] = {}
+    for session in session_manager.get_all_users():
+        if not session.chat_id:
+            continue
+        if session.proactive_today_date == today:
+            user_today_count[session.user_id] = (
+                user_today_count.get(session.user_id, 0) + session.proactive_today_count
+            )
+
     for session in session_manager.get_all_users():
         if not session.chat_id:
             continue
@@ -115,11 +125,11 @@ async def _check_and_notify(
             # no message ever received, skip
             continue
 
-        # Daily cap check
+        # Daily cap check: aggregate per-user sends across all sessions
         if cfg.max_per_day > 0:
-            if session.proactive_today_date == today:
-                if session.proactive_today_count >= cfg.max_per_day:
-                    continue
+            total_sent = user_today_count.get(session.user_id, 0)
+            if total_sent >= cfg.max_per_day:
+                continue
 
         # Cooldown check: skip if a proactive message was sent recently
         if session.last_proactive_at:
@@ -131,6 +141,8 @@ async def _check_and_notify(
         if any(s.chat_id == session.chat_id for s in already_notified):
             continue
         already_notified.append(session)
+        # Update running total so subsequent sessions for same user are capped
+        user_today_count[session.user_id] = user_today_count.get(session.user_id, 0) + 1
         await _send_proactive_message(session, config, session_manager)
 
 

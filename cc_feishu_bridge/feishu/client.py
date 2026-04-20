@@ -183,13 +183,15 @@ class FeishuClient:
         if not response.success():
             logger.warning(f"get_message({message_id}) failed: {response.msg}")
             return None
-        if not (response.data and response.data.items):
+        # GetMessageResponseBody has .message (single Message object), not .items
+        msg_obj = getattr(response.data, "message", None) if response.data else None
+        if not msg_obj:
+            logger.warning(f"get_message({message_id}): no message in response.data")
             return None
-        item = response.data.items[0]
         return {
-            "msg_type": item.msg_type,
-            "content": item.body.content if item.body else "",
-            "sender_id": item.sender.id if item.sender else "",
+            "msg_type": getattr(msg_obj, "msg_type", ""),
+            "content": getattr(msg_obj.body, "content", "") if msg_obj.body else "",
+            "sender_id": getattr(msg_obj.sender, "id", "") if msg_obj.sender else "",
         }
 
     async def add_typing_reaction(self, message_id: str) -> str | None:
@@ -579,10 +581,21 @@ class FeishuClient:
             logger.error(f"Failed to parse incoming message: {e}")
             return None
 
-    def _extract_content(self, message: dict) -> str:
-        """Extract text content from message."""
-        msg_type = message.get("msg_type", "")
-        content_str = message.get("content", "{}")
+    def _extract_content(self, message) -> str:
+        """Extract text content from a message.
+
+        Handles both plain dicts (from get_chat_history v0.4.2 API) and
+        lark-oapi Message objects (from get_chat_history with newer API).
+        """
+        # Get msg_type — try dict access first, then lark-oapi attribute
+        if isinstance(message, dict):
+            msg_type = message.get("msg_type", "")
+            content_str = message.get("content", "{}")
+        else:
+            # lark-oapi Message object
+            msg_type = getattr(message, "msg_type", "") or ""
+            body = getattr(message, "body", None)
+            content_str = getattr(body, "content", "{}") if body else "{}"
         try:
             import json
             content = json.loads(content_str)
