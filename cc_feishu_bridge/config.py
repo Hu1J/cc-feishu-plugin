@@ -47,15 +47,6 @@ class StorageConfig:
     db_path: str = "./data/sessions.db"
 
 
-@dataclass
-class ProactiveConfig:
-    enabled: bool = True
-    time_window_start: str = "08:00"   # HH:MM 格式
-    time_window_end: str = "22:00"      # HH:MM 格式
-    silence_threshold_minutes: int = 90
-    check_interval_minutes: int = 30  # 至少30分钟检查一次，避免频繁打扰
-    max_per_day: int = 3              # 0 表示不限次数
-    cooldown_minutes: int = 120       # 发完一条后，同会话冷却分钟数（至少2小时）
 
 
 @dataclass
@@ -64,7 +55,6 @@ class Config:
     auth: AuthConfig
     claude: ClaudeConfig
     storage: StorageConfig
-    proactive: ProactiveConfig = field(default_factory=ProactiveConfig)
     data_dir: str = ""
     bypass_accepted: bool = False
 
@@ -75,19 +65,6 @@ def _upgrade_config(path: str) -> None:
         raw = yaml.safe_load(f)
 
     changed = False
-
-    # Add proactive section if missing
-    if "proactive" not in raw:
-        raw["proactive"] = {
-            "enabled": True,
-            "time_window_start": "08:00",
-            "time_window_end": "22:00",
-            "silence_threshold_minutes": 90,
-            "check_interval_minutes": 30,
-            "max_per_day": 3,
-            "cooldown_minutes": 120,
-        }
-        changed = True
 
     # Remove stale server section (deprecated in v0.2.3)
     if "server" in raw:
@@ -118,13 +95,11 @@ def load_config(path: str, data_dir: str = "") -> Config:
     feishu_raw["groups"] = groups
     feishu_cfg = FeishuConfig(**feishu_raw)
 
-    proactive = ProactiveConfig(**raw.get("proactive", {}))
     return Config(
         feishu=feishu_cfg,
         auth=AuthConfig(**raw.get("auth", {})),
         claude=ClaudeConfig(**raw.get("claude", {})),
         storage=StorageConfig(**raw.get("storage", {})),
-        proactive=proactive,
         data_dir=data_dir,
         bypass_accepted=raw.get("bypass_accepted", False),
     )
@@ -168,15 +143,6 @@ def save_config(path: str, feishu_app_id: str, feishu_app_secret: str,
         },
         "storage": {
             "db_path": storage_db_path,
-        },
-        "proactive": {
-            "enabled": True,
-            "time_window_start": "08:00",
-            "time_window_end": "22:00",
-            "silence_threshold_minutes": 90,
-            "check_interval_minutes": 30,
-            "max_per_day": 3,
-            "cooldown_minutes": 120,
         },
         "bypass_accepted": bypass_accepted,
     }

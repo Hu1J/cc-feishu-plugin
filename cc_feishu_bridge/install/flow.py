@@ -60,10 +60,10 @@ async def run_install_flow(config_path: str = "config.yaml") -> AppRegistrationR
 def save_config(result: AppRegistrationResult, config_path: str, bypass_accepted: bool = False) -> None:
     """Write the app credentials and defaults to config.yaml.
 
-    Preserves existing 'groups' and 'proactive' sections so re-running
-    the install flow does not wipe group registrations or proactive config.
+    Preserves existing 'groups' section so re-running
+    the install flow does not wipe group registrations.
     """
-    # Merge with existing config to preserve groups, proactive, etc.
+    # Merge with existing config to preserve groups, etc.
     existing = {}
     if Path(config_path).exists():
         with open(config_path) as f:
@@ -90,15 +90,6 @@ def save_config(result: AppRegistrationResult, config_path: str, bypass_accepted
         "storage": {
             "db_path": str(Path(config_path).resolve().parent / "sessions.db"),
         },
-        "proactive": existing.get("proactive", {
-            "enabled": True,
-            "time_window_start": "08:00",
-            "time_window_end": "22:00",
-            "silence_threshold_minutes": 90,
-            "check_interval_minutes": 5,
-            "max_per_day": 3,
-            "cooldown_minutes": 60,
-        }),
         "bypass_accepted": bypass_accepted,
     }
 

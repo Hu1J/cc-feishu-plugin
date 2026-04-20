@@ -30,7 +30,6 @@ from cc_feishu_bridge.security.validator import SecurityValidator
 from cc_feishu_bridge.claude.integration import ClaudeIntegration
 from cc_feishu_bridge.claude.session_manager import SessionManager
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
-from cc_feishu_bridge.proactive_scheduler import ProactiveScheduler
 from cc_feishu_bridge.cron_scheduler import CronScheduler
 from cc_feishu_bridge.claude.cron_tools import set_cron_scheduler
 
@@ -256,10 +255,8 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     write_pid(pid_file)
 
     # Clean up PID file and lock on exit
-    proactive = None
     cron_scheduler = None
     def cleanup(signum, frame):
-        proactive.stop()
         cron_scheduler.stop()
         remove_pid(pid_file)
         lock.release()
@@ -276,10 +273,6 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     for sub in ("received_images", "received_files"):
         sub_dir = os.path.join(data_dir, sub)
         os.makedirs(sub_dir, exist_ok=True)
-
-    # Start proactive scheduler (uses its own independent ClaudeIntegration instance)
-    proactive = ProactiveScheduler(config, handler.sessions)
-    proactive.start()
 
     # Start cron scheduler (定时任务后台调度器)
     cron_scheduler = CronScheduler(config, data_dir)

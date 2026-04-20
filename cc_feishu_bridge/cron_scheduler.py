@@ -519,19 +519,22 @@ async def _run_job(job: dict, config: Config, data_dir: str):
         logger.warning(f"[cron] Job {job_id} Claude error: {e}")
         _log("CLAUDE_QUERY_ERROR", str(e))
         # Write execution trace before saving error result
-        output_file = _save_job_output(job_id, data_dir, steps, response=None, error=str(e))
+        total_elapsed = (datetime.now(_CST) - ts_start).total_seconds()
+        output_file = _save_job_output(job_id, data_dir, steps, response=None, error=str(e), total_elapsed=total_elapsed)
         mark_run(job_id, success=False, error=str(e), data_dir=data_dir)
         return
 
     if not response or not response.strip():
         logger.info(f"[cron] Job {job_id} empty response, skipping send")
         _log("CLAUDE_RESPONSE_EMPTY")
-        output_file = _save_job_output(job_id, data_dir, steps, response=None, error=None)
+        total_elapsed = (datetime.now(_CST) - ts_start).total_seconds()
+        output_file = _save_job_output(job_id, data_dir, steps, response=None, error=None, total_elapsed=total_elapsed)
         mark_run(job_id, success=True, data_dir=data_dir)
         return
 
     # ── Save output with execution trace ─────────────────────────────────────
-    output_file = _save_job_output(job_id, data_dir, steps, response=response.strip(), error=None)
+    total_elapsed = (datetime.now(_CST) - ts_start).total_seconds()
+    output_file = _save_job_output(job_id, data_dir, steps, response=response.strip(), error=None, total_elapsed=total_elapsed)
     logger.info(f"[cron] Job {job_id} output saved to {output_file}")
 
     # ── Deliver ────────────────────────────────────────────────────────────────
@@ -556,10 +559,8 @@ async def _run_job(job: dict, config: Config, data_dir: str):
     mark_run(job_id, success=True, data_dir=data_dir)
 
 
-def _save_job_output(job_id: str, data_dir: str, steps: list[str], response: str | None, error: str | None) -> str:
+def _save_job_output(job_id: str, data_dir: str, steps: list[str], response: str | None, error: str | None, total_elapsed: float | None = None) -> str:
     """Build a complete execution log file with all steps + optional response + optional error."""
-    import time as time_module
-    t0 = time_module.time()
     store = _CronStore(data_dir)
     timestamp = _utcnow().strftime("%Y-%m-%d_%H-%M-%S")
     path = store.output_path(job_id, timestamp)
@@ -571,7 +572,8 @@ def _save_job_output(job_id: str, data_dir: str, steps: list[str], response: str
             f.write("# 执行日志\n\n")
             for line in steps:
                 f.write(f"{line}\n")
-            f.write(f"\n[完成] 耗时 {time_module.time() - t0:.2f}s\n")
+            elapsed_str = f"{total_elapsed:.1f}s" if total_elapsed is not None else "—"
+            f.write(f"\n[完成] 耗时 {elapsed_str}\n")
 
             # ── Claude response ──────────────────────────────────────────────
             if error:
