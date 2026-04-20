@@ -229,6 +229,15 @@ class ReplyFormatter:
         elif tool_name == "Read":
             return self._format_read_tool(tool_input)
 
+        # Cron MCP tools → ⏰ 时钟图标
+        elif tool_name and tool_name.startswith("mcp__cron__"):
+            icon = "⏰"
+            short = tool_name.replace("mcp__cron__", "")
+            msg = f"{icon} **{short}**"
+            if tool_input and len(tool_input) <= FEISHU_MAX_MESSAGE_LENGTH - len(msg) - 5:
+                msg += f"\n`{tool_input}`"
+            return msg
+
         # 其他工具 → backtick 格式（原有逻辑）
         icon = self.tool_icons.get(tool_name, "🤖")
         msg = f"{icon} **{tool_name}**"
