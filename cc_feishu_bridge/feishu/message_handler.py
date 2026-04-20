@@ -323,10 +323,12 @@ class MessageHandler:
 
     async def _process_message(self, message: IncomingMessage) -> None:
         """处理单条消息：鉴权 → 媒体预处理 → 引用检测 → 查询。"""
-        auth_result = self.auth.authenticate(message.user_open_id)
-        if not auth_result.authorized:
-            logger.info(f"Ignoring message from unauthorized user: {message.user_open_id}")
-            return
+        # P2P: allowed_users whitelist applies. Group @mention: controlled by GroupConfigEntry.
+        if not message.is_group_chat:
+            auth_result = self.auth.authenticate(message.user_open_id)
+            if not auth_result.authorized:
+                logger.info(f"Ignoring message from unauthorized user: {message.user_open_id}")
+                return
 
         # Group chat: skip if bot was not @mentioned (no response to avoid spam)
         # Group access control check (per-group config: enabled, allow_from, require_mention)
