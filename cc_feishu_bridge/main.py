@@ -31,6 +31,8 @@ from cc_feishu_bridge.claude.integration import ClaudeIntegration
 from cc_feishu_bridge.claude.session_manager import SessionManager
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 from cc_feishu_bridge.proactive_scheduler import ProactiveScheduler
+from cc_feishu_bridge.cron_scheduler import CronScheduler
+from cc_feishu_bridge.claude.cron_tools import set_cron_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -255,8 +257,10 @@ def start_bridge(config_path: str, data_dir: str) -> None:
 
     # Clean up PID file and lock on exit
     proactive = None
+    cron_scheduler = None
     def cleanup(signum, frame):
         proactive.stop()
+        cron_scheduler.stop()
         remove_pid(pid_file)
         lock.release()
         sys.exit(0)
@@ -276,6 +280,11 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     # Start proactive scheduler (uses its own independent ClaudeIntegration instance)
     proactive = ProactiveScheduler(config, handler.sessions)
     proactive.start()
+
+    # Start cron scheduler (定时任务后台调度器)
+    cron_scheduler = CronScheduler(config, data_dir)
+    set_cron_scheduler(cron_scheduler, config)
+    cron_scheduler.start()
 
     # CLI 进程在第一条消息到达时才会建立连接（_ensure_connected 懒加载）。
     # SDK 通过 continue_conversation=True 自动维护 session，无需手动 fork。

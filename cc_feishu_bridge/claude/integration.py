@@ -57,9 +57,11 @@ class ClaudeIntegration:
         from claude_agent_sdk import ClaudeAgentOptions
         from cc_feishu_bridge.claude.memory_tools import get_memory_mcp_server
         from cc_feishu_bridge.claude.feishu_file_tools import get_feishu_file_mcp_server
+        from cc_feishu_bridge.claude.cron_tools import get_cron_mcp_server
 
         memory_server = get_memory_mcp_server()
         feishu_server = get_feishu_file_mcp_server()
+        cron_server = get_cron_mcp_server()
 
         options = ClaudeAgentOptions(
             cwd=self.approved_directory or ".",
@@ -71,6 +73,7 @@ class ClaudeIntegration:
             mcp_servers={
                 "memory": memory_server,
                 "feishu_file": feishu_server,
+                "cron": cron_server,
             },
         )
 

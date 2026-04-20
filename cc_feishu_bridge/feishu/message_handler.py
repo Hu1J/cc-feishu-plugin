@@ -14,6 +14,7 @@ from cc_feishu_bridge.security.validator import SecurityValidator
 from cc_feishu_bridge.claude.integration import ClaudeIntegration
 from cc_feishu_bridge.claude.memory_manager import get_memory_manager, MEMORY_SYSTEM_GUIDE
 from cc_feishu_bridge.claude.feishu_file_tools import FEISHU_FILE_GUIDE
+from cc_feishu_bridge.claude.cron_tools import CRON_SYSTEM_GUIDE
 from cc_feishu_bridge.claude.session_manager import SessionManager
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 from cc_feishu_bridge.format.edit_diff import _DiffMarker, _MemoryCardMarker
@@ -371,6 +372,7 @@ class MessageHandler:
         system_prompt_append = (
             MEMORY_SYSTEM_GUIDE
             + FEISHU_FILE_GUIDE
+            + CRON_SYSTEM_GUIDE
             + self.memory_manager.inject_context(user_open_id=message.user_open_id)
         )
 
