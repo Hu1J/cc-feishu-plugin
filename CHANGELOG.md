@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-04-20
+
+### Fixed
+
+- **Group @mention 鉴权**：修复群聊 @mention 消息被 `allowed_users` 白名单错误拦截的问题，群聊访问控制现完全由 `GroupConfigEntry` 管理
+
 ## [0.5.0] - 2026-04-20
 
 ### Added
