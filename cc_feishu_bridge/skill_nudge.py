@@ -96,6 +96,7 @@ SKILL_NUDGE_PROMPT = """\
 async def trigger_skill_review(
     make_claude_query: Callable[..., Awaitable[tuple]],
     project_path: str,
+    nudge: SkillNudge,
 ) -> None:
     """Trigger a background skill review by calling Claude Code.
 
@@ -103,8 +104,8 @@ async def trigger_skill_review(
         make_claude_query: a callable that runs a Claude query and returns
             (response_text, session_id, cost)
         project_path: the current project path for Claude context
+        nudge: the SkillNudge instance to manage counter and pending state
     """
-    nudge = get_nudge()
     if not nudge or not nudge.config.enabled:
         return
 

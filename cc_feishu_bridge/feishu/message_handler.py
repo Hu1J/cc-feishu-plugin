@@ -138,7 +138,8 @@ class MessageHandler:
         self.memory_manager = get_memory_manager()
         self.memory_manager.set_system_prompt_stale_callback(self.claude.mark_system_prompt_stale)
         self._skill_nudge = skill_nudge
-        self._pending_memory_suggestion: str | None = None  # set by _trigger_memory_review
+        # Per-chat pending memory suggestion: chat_id -> suggestion text
+        self._pending_memory_suggestions: dict[str, str] = {}
         self._queue: asyncio.Queue[IncomingMessage] | None = None
         self._queue_loop_id: int | None = None
         # Group chat history: chat_id -> list of recent message contents (max 20)
@@ -184,11 +185,16 @@ class MessageHandler:
                 result, _, _ = await self.claude.query(prompt=prompt)
                 if result and "无需更新" not in result and "建议更新" in result:
                     suggestion = result.strip()
-                    self._pending_memory_suggestion = suggestion
-                    await self._safe_send(
-                        message.chat_id, message.message_id,
-                        "💡 记忆更新建议：\n\n" + suggestion + "\n\n回复'确认更新'我可帮你写入记忆。",
-                    )
+                    self._pending_memory_suggestions[message.chat_id] = suggestion
+                    try:
+                        await self._safe_send(
+                            message.chat_id, message.message_id,
+                            "💡 记忆更新建议：\n\n" + suggestion + "\n\n回复'确认更新'我可帮你写入记忆。",
+                        )
+                    except Exception as send_err:
+                        # safe_send failed — clear pending so user is not stuck
+                        logger.warning(f"[_trigger_memory_review] safe_send failed: {send_err}")
+                        self._pending_memory_suggestions.pop(message.chat_id, None)
             except Exception as e:
                 logger.warning(f"[_trigger_memory_review] failed: {e}")
 
@@ -197,10 +203,10 @@ class MessageHandler:
     def _apply_memory_update(self, message: IncomingMessage) -> None:
         """Write the pending memory suggestion to MEMORY.md after user confirms.
 
-        Reads the stored suggestion from _pending_memory_suggestion, asks Claude
+        Reads the stored suggestion from _pending_memory_suggestions[chat_id], asks Claude
         to format it properly, then appends/writes to the project's MEMORY.md.
         """
-        suggestion = self._pending_memory_suggestion
+        suggestion = self._pending_memory_suggestions.get(message.chat_id)
         if not suggestion:
             asyncio.create_task(self._safe_send(
                 message.chat_id, message.message_id,
@@ -224,7 +230,7 @@ class MessageHandler:
                 result, _, _ = await self.claude.query(prompt=prompt)
                 if not result or result.strip() == "无需更新":
                     await self._safe_send(message.chat_id, message.message_id, "好的，不写入记忆。")
-                    self._pending_memory_suggestion = None
+                    self._pending_memory_suggestions.pop(message.chat_id, None)
                     return
 
                 content = result.strip()
@@ -236,7 +242,7 @@ class MessageHandler:
                 # Append under a new section
                 updated = existing.rstrip() + "\n\n" + content + "\n"
                 memory_path.write_text(updated, errors="replace")
-                self._pending_memory_suggestion = None
+                self._pending_memory_suggestions.pop(message.chat_id, None)
                 await self._safe_send(
                     message.chat_id, message.message_id,
                     f"✅ 记忆已更新：\n\n{content[:500]}",
@@ -1056,6 +1062,7 @@ class MessageHandler:
                                 trigger_skill_review(
                                     make_claude_query=lambda p: self.claude.query(prompt=p),
                                     project_path=getattr(self, "_current_project_path", ""),
+                                    nudge=nudge,
                                 )
                             )
 

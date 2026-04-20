@@ -108,14 +108,20 @@ def _register_skill_optimization_job(data_dir: str, scheduler) -> None:
         logger.info("[skill_optimize] no skills found, skipping")
         return
 
-    prompt = _build_skill_review_prompt(skill_summaries)
-
     # Get chat_id from active session
-    from cc_feishu_bridge.cron_scheduler import create_job
+    from cc_feishu_bridge.cron_scheduler import list_jobs, create_job
     chat_id = _get_active_chat_id(data_dir)
     if not chat_id:
         logger.info("[skill_optimize] no active chat_id, skipping")
         return
+
+    # Idempotency: skip if a "Skill 优化扫描" job already exists
+    existing = list_jobs(data_dir)
+    if any(j.get("name") == "Skill 优化扫描" for j in existing):
+        logger.info("[skill_optimize] job already registered, skipping")
+        return
+
+    prompt = _build_skill_review_prompt(skill_summaries)
 
     try:
         create_job(
