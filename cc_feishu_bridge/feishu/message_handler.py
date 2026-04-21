@@ -181,19 +181,14 @@ class MessageHandler:
             if self.claude._options is None:
                 self.claude._init_options()
 
-            accumulator = StreamAccumulator(message.chat_id, message.message_id, self._safe_send)
-
             async def stream_callback(claude_msg):
-                if claude_msg.tool_name:
-                    await accumulator.flush()
+                if claude_msg.tool_name and claude_msg.tool_name.startswith("mcp__memory__"):
                     result = self.formatter.format_tool_call(claude_msg.tool_name, claude_msg.tool_input)
-                    logger.info(f"[stream] tool: {claude_msg.tool_name} | input: {claude_msg.tool_input}")
-                elif claude_msg.content:
-                    await accumulator.add_text(claude_msg.content)
+                    await self._safe_send(message.chat_id, message.message_id, result)
+                    logger.info(f"[memory_review] tool: {claude_msg.tool_name}")
 
             try:
                 await self.claude.query(prompt=prompt, on_stream=stream_callback)
-                await accumulator.flush()
 
             except Exception as e:
                 logger.warning(f"[_trigger_memory_review] failed: {e}")
