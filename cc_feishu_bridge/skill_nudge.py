@@ -115,9 +115,7 @@ async def trigger_skill_review(
 
     logger.info("[skill_nudge] triggering skill review")
 
-    import os
     from pathlib import Path
-    from datetime import datetime
 
     skills_dir = Path.home() / ".claude" / "skills"
     # Record mtimes of existing skills before review so we can detect changes
@@ -177,21 +175,10 @@ async def trigger_skill_review(
         if chat_id and send_to_feishu:
             try:
                 if changes:
-                    lines = ["🧠 **Skill 自进化结果**\n"]
-                    for c in changes:
-                        lines.append(f"{c['action']} **{c['name']}**")
-                        if c["description"]:
-                            lines.append(f"   📝 {c['description'][:100]}")
-                    lines.append("")
-                    lines.append("---")
-                    lines.append("_ Skill 文件已写入 ~/.claude/skills/，下次对话自动生效_")
-                    await send_to_feishu(chat_id, "\n".join(lines))
-                elif response:
-                    # No file changes but review ran — show a brief summary
-                    summary = response.strip()[:300]
+                    parts = [c["action"] + " **" + c["name"] + "**" for c in changes]
                     await send_to_feishu(
                         chat_id,
-                        f"🧠 **Skill 评审完成**\n\n{summary}\n\n_本次评审未创建或更新任何 Skill_",
+                        "🧠 Skill 自进化：" + "、".join(parts),
                     )
             except Exception as e:
                 logger.warning(f"[skill_nudge] failed to send to Feishu: {e}")
