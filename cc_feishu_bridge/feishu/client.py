@@ -183,8 +183,12 @@ class FeishuClient:
         if not response.success():
             logger.warning(f"get_message({message_id}) failed: {response.msg}")
             return None
-        # GetMessageResponseBody has .message (single Message object), not .items
+        # Try .message first (newer lark-oapi), fall back to .items[0] (older or image msgs)
         msg_obj = getattr(response.data, "message", None) if response.data else None
+        if msg_obj is None and response.data:
+            items = getattr(response.data, "items", None)
+            if items:
+                msg_obj = items[0] if items else None
         if not msg_obj:
             logger.warning(f"get_message({message_id}): no message in response.data")
             return None
