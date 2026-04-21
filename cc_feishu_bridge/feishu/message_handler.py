@@ -134,6 +134,12 @@ class MessageHandler:
             max_turns=5,
             approved_directory=approved_directory,
         )
+        # Dedicated Claude instance for skill self-evolution — separate session, does not block
+        self.claude_skill = ClaudeIntegration(
+            cli_path=config.claude.cli_path,
+            max_turns=5,
+            approved_directory=approved_directory,
+        )
         self.sessions = session_manager
         self.formatter = formatter
         self.approved_directory = approved_directory
@@ -189,7 +195,11 @@ class MessageHandler:
             async def stream_callback(claude_msg):
                 if claude_msg.tool_name and claude_msg.tool_name.startswith("mcp__memory__"):
                     result = self.formatter.format_tool_call(claude_msg.tool_name, claude_msg.tool_input)
-                    await self._safe_send(message.chat_id, message.message_id, result)
+                    if isinstance(result, _MemoryCardMarker):
+                        card_md = self._render_memory_card(result)
+                        await self._safe_send(message.chat_id, message.message_id, self.formatter.format_text(card_md))
+                    else:
+                        await self._safe_send(message.chat_id, message.message_id, result)
                     logger.info(f"[memory_review] tool: {claude_msg.tool_name}")
 
             try:
@@ -362,7 +372,6 @@ class MessageHandler:
                 except Exception:
                     logger.exception("Worker loop error")
         finally:
-            self._skill_symlink_hook.stop()
             self._is_processing = False
 
     async def _process_message(self, message: IncomingMessage) -> None:
@@ -419,7 +428,10 @@ class MessageHandler:
             MEMORY_SYSTEM_GUIDE
             + FEISHU_FILE_GUIDE
             + CRON_SYSTEM_GUIDE
-            + self.memory_manager.inject_context(user_open_id=message.user_open_id)
+            + self.memory_manager.inject_context(
+                user_open_id=message.user_open_id,
+                project_path=project_path,
+            )
         )
 
         # 确保 options 已初始化
@@ -1003,10 +1015,13 @@ class MessageHandler:
                             nudge.config.current_user = message.user_open_id
                         if nudge and nudge.increment():
                             logger.info("[_trigger_skill_review] starting background review")
-                            # Fire-and-forget: trigger review in background, do not block stream
+                            # Fire-and-forget: trigger review in background, does not block stream
+                            # Uses dedicated claude_skill instance (separate session from main conversation)
+                            if self.claude_skill._options is None:
+                                self.claude_skill._init_options()
                             asyncio.create_task(
                                 trigger_skill_review(
-                                    make_claude_query=lambda p: self.claude.query(prompt=p),
+                                    make_claude_query=lambda p: self.claude_skill.query(prompt=p),
                                     nudge=nudge,
                                     chat_id=message.chat_id,
                                     send_to_feishu=lambda cid, text: self._safe_send(cid, message.message_id, text),
