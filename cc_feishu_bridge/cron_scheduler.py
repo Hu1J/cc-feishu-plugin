@@ -251,34 +251,34 @@ class _PendingStore:
                 pass
             raise
 
-    def add(self, job_id: str, response: str, chat_id: str, job_name: str, notify_at: str) -> None:
-        """Save a pending notification."""
+    def add(self, job_id: str, response: str, chat_id: str, job_name: str, notify_at: str) -> str:
+        """Save a pending notification. Returns the unique key for this pending entry."""
         data = self._load()
-        data[job_id] = {
+        created_at = _utcnow().isoformat()
+        # Use job_id + created_at as key to avoid overwriting when same job triggers again
+        pending_key = f"{job_id}:{created_at}"
+        data[pending_key] = {
             "response": response,
             "chat_id": chat_id,
             "job_name": job_name,
             "notify_at": notify_at,
-            "created_at": _utcnow().isoformat(),
+            "created_at": created_at,
+            "job_id": job_id,  # store original job_id for reference
         }
         self._save(data)
+        return pending_key
 
     def get_due(self) -> list[dict]:
-        """Return all pending notifications that are due to be sent."""
+        """Return all pending notifications that are due to be sent (does NOT remove them)."""
         data = self._load()
         now = _utcnow()
         due = []
-        still_pending = {}
-        for job_id, entry in data.items():
+        for pending_key, entry in data.items():
             notify_at = _ensure_aware(datetime.fromisoformat(entry["notify_at"]))
             if notify_at <= now:
                 entry_copy = dict(entry)
-                entry_copy["job_id"] = job_id
+                entry_copy["pending_key"] = pending_key
                 due.append(entry_copy)
-            else:
-                still_pending[job_id] = entry
-        if len(data) != len(still_pending):
-            self._save(still_pending)
         return due
 
     def remove(self, job_id: str) -> None:
@@ -829,12 +829,19 @@ class CronScheduler:
                 bot_name=self.config.feishu.bot_name,
                 data_dir=self.data_dir,
             )
-            await poll_skill_changes_and_notify(
-                data_dir=self.data_dir,
-                skills_dir=skills_dir,
-                send_to_feishu=lambda cid, text: feishu.send_post(cid, text),
-                get_chat_id=lambda dd: _get_active_chat_id(dd),
-            )
+
+            async def _skill_send(cid, text):
+                await feishu.send_post(cid, text)
+
+            try:
+                await poll_skill_changes_and_notify(
+                    data_dir=self.data_dir,
+                    skills_dir=skills_dir,
+                    send_to_feishu=_skill_send,
+                    get_chat_id=lambda dd: _get_active_chat_id(dd),
+                )
+            except Exception:
+                logger.exception("[cron] poll_skill_changes_and_notify error")
 
         # Deliver any pending notifications that have reached their notify_at time
         pending_store = _PendingStore(self.data_dir)
@@ -852,13 +859,14 @@ class CronScheduler:
                 header = f"⏰ **{entry['job_name']}**"
                 body = optimize_markdown_style(entry["response"], card_version=2)
                 text = f"{header}\n\n{body}"
+                pending_key = entry.get("pending_key", entry.get("job_id", ""))
                 try:
                     if should_use_card(body):
                         await feishu.send_interactive_card(entry["chat_id"], text)
                     else:
                         await feishu.send_post(entry["chat_id"], text)
-                    pending_store.remove(entry.get("job_id", ""))
-                    logger.info(f"[cron] Pending notification delivered for job {entry.get('job_id', '')}")
+                    pending_store.remove(pending_key)
+                    logger.info(f"[cron] Pending notification delivered for job {pending_key}")
                 except Exception as e:
                     logger.warning(f"[cron] Pending notification delivery failed: {e}")
 
