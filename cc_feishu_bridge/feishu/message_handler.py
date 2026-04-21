@@ -1190,7 +1190,10 @@ class MessageHandler:
         finally:
             if reaction_id:
                 logger.info(f"[typing] off — user={message.user_open_id}, reaction_id={reaction_id!r}")
-                await self.feishu.remove_typing_reaction(message.message_id, reaction_id)
+                try:
+                    await self.feishu.remove_typing_reaction(message.message_id, reaction_id)
+                except Exception as exc:
+                    logger.warning(f"[typing] remove_typing_reaction failed: {exc}")
             # Trigger memory review after [typing] off
             self._trigger_memory_review(message, _last_response)
 
@@ -1198,17 +1201,20 @@ class MessageHandler:
             nudge = self._skill_nudge
             if nudge and nudge._pending:
                 logger.info("[_trigger_skill_review] starting background review")
-                if self.claude_skill._options is None:
-                    self.claude_skill._init_options()
-                asyncio.create_task(
-                    trigger_skill_review(
-                        make_claude_query=lambda p: self.claude_skill.query(prompt=p),
-                        nudge=nudge,
-                        chat_id=message.chat_id,
-                        send_to_feishu=lambda cid, text: self._safe_send(cid, message.message_id, text),
-                        skills_dir=Path(self.data_dir) / "skills",
+                try:
+                    if self.claude_skill._options is None:
+                        self.claude_skill._init_options()
+                    asyncio.create_task(
+                        trigger_skill_review(
+                            make_claude_query=lambda p: self.claude_skill.query(prompt=p),
+                            nudge=nudge,
+                            chat_id=message.chat_id,
+                            send_to_feishu=lambda cid, text: self._safe_send(cid, message.message_id, text),
+                            skills_dir=Path(self.data_dir) / "skills",
+                        )
                     )
-                )
+                except Exception:
+                    logger.warning(f"[_trigger_skill_review] failed to start: {e}")
 
     async def _handle_stop(self, message: IncomingMessage) -> HandlerResult:
         """Handle /stop — cancel the current worker task and interrupt Claude."""

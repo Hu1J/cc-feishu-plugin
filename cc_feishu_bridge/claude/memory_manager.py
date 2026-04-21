@@ -362,7 +362,10 @@ class MemoryManager:
             lines = ["\n【用户偏好】", "---"]
             for p in prefs:
                 lines.append(f"**{p.title}**")
-                lines.append(f"{p.content}")
+                content = p.content
+                if len(content) > 200:
+                    content = content[:200] + "…"
+                lines.append(content)
                 lines.append("")
             latest = max((p.updated_at for p in prefs if p.updated_at), default="unknown")
             lines.append(f"\n__PREFS_VERSION:{latest}__")
@@ -515,9 +518,19 @@ class MemoryManager:
             return []
 
     def _get_tfidf_cache(self, project_path: str) -> tuple:
-        """获取或构建某项目的 TF-IDF 缓存（线程安全，按 db_path + project_path 分隔）"""
+        """获取或构建某项目的 TF-IDF 缓存（双检查锁定，读写分离）。
+
+        第一次检查（无锁）：快速判断 cache 是否已存在。
+        第二次检查（有锁）：防止多线程同时构建。
+        """
         cache_key = (self.db_path, project_path)
+
+        # 第一次检查：无需加锁，先看 cache 是否已存在
+        if cache_key in self._tfidf_cache:
+            return self._tfidf_cache[cache_key]
+
         with self._tfidf_lock:
+            # 第二次检查：抢到锁后再确认，避免重复构建
             if cache_key in self._tfidf_cache:
                 return self._tfidf_cache[cache_key]
 
