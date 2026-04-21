@@ -171,31 +171,11 @@ class MessageHandler:
         return self._queue
 
     def _trigger_memory_review(self, message: IncomingMessage, response_text: str) -> None:
-        """Monitor memory changes after each conversation ends.
+        """Ask Claude to review conversation and update memory via MCP tools.
 
-        Asks Claude to consider updating memory via MCP tools if it wants.
-        The bridge monitors DB before/after and notifies only if memory actually changed.
+        Claude's tool calls (memory operations) are streamed directly to the user.
         """
         logger.info("[_trigger_memory_review] starting background review")
-        project_path = getattr(self, "_current_project_path", "")
-        mm = self.memory_manager
-        user_open_id = message.user_open_id
-        # Snapshot before: project memories + user preferences
-        before_proj_ids = set()
-        before_user_ids = set()
-        if mm:
-            if project_path:
-                try:
-                    before_proj_ids = {m.id for m in mm.get_project_memories(project_path)}
-                except Exception:
-                    pass
-            try:
-                if user_open_id:
-                    before_user_ids = {p.id for p in mm.get_preferences_by_user(user_open_id)}
-                else:
-                    before_user_ids = {p.id for p in mm.get_all_preferences()}
-            except Exception:
-                pass
 
         prompt = (
             "根据之前的对话，判断是否有值得记住的信息。需要时直接调用 MCP 工具（新增/更新/删除）来管理记忆，不需要问我任何问题。\n"
@@ -205,58 +185,20 @@ class MessageHandler:
             # Defensive: ensure claude is initialized before querying
             if self.claude._options is None:
                 self.claude._init_options()
+
+            accumulator = StreamAccumulator(message.chat_id, message.message_id, self._safe_send)
+
+            async def stream_callback(claude_msg):
+                if claude_msg.tool_name:
+                    await accumulator.flush()
+                    result = self.formatter.format_tool_call(claude_msg.tool_name, claude_msg.tool_input)
+                    logger.info(f"[stream] tool: {claude_msg.tool_name} | input: {claude_msg.tool_input}")
+                elif claude_msg.content:
+                    await accumulator.add_text(claude_msg.content)
+
             try:
-                await self.claude.query(prompt=prompt)
-                # CC may or may not have called MCP tools — we just monitor DB
-
-                # Check if anything changed
-                after_proj_ids = before_proj_ids
-                after_user_ids = before_user_ids
-                if mm:
-                    try:
-                        if project_path:
-                            after_proj_ids = {m.id for m in mm.get_project_memories(project_path)}
-                    except Exception:
-                        pass
-                    try:
-                        if user_open_id:
-                            after_user_ids = {p.id for p in mm.get_preferences_by_user(user_open_id)}
-                        else:
-                            after_user_ids = {p.id for p in mm.get_all_preferences()}
-                    except Exception:
-                        pass
-
-                new_proj = after_proj_ids - before_proj_ids
-                new_user = after_user_ids - before_user_ids
-
-                if not new_proj and not new_user:
-                    return  # nothing changed
-
-                # Fetch details of new entries for notification
-                new_entries = []
-                if mm:
-                    try:
-                        if new_proj and project_path:
-                            all_mems = mm.get_project_memories(project_path)
-                            new_entries.extend([m for m in all_mems if m.id in new_proj])
-                    except Exception:
-                        pass
-                    try:
-                        all_prefs = mm.get_all_preferences() if not user_open_id else mm.get_preferences_by_user(user_open_id)
-                        new_entries.extend([p for p in all_prefs if p.id in new_user])
-                    except Exception:
-                        pass
-
-                if new_entries and message.chat_id:
-                    parts = [f"**{e.title}**" for e in new_entries]
-                    kind = "项目记忆" if new_proj else "用户偏好"
-                    try:
-                        await self._safe_send(
-                            message.chat_id, message.message_id,
-                            f"💡 {kind}已自主更新：{'、'.join(parts)}",
-                        )
-                    except Exception as send_err:
-                        logger.warning(f"[_trigger_memory_review] safe_send failed: {send_err}")
+                await self.claude.query(prompt=prompt, on_stream=stream_callback)
+                await accumulator.flush()
 
             except Exception as e:
                 logger.warning(f"[_trigger_memory_review] failed: {e}")

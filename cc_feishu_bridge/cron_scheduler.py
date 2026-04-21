@@ -250,6 +250,7 @@ def create_job(
     name: Optional[str] = None,
     repeat: Optional[int] = None,
     data_dir: str = "",
+    verbose: bool = False,
 ) -> dict:
     """
     Create a new cron job.
@@ -261,6 +262,7 @@ def create_job(
         name: Optional friendly name
         repeat: None = infinite, int = max runs
         data_dir: Bridge data directory
+        verbose: If True, stream tool calls to Feishu in real-time (default False)
 
     Returns:
         The created job dict
@@ -287,6 +289,7 @@ def create_job(
         "enabled": True,
         "state": "scheduled",
         "chat_id": chat_id,
+        "verbose": verbose,
         "created_at": now.isoformat(),
         "next_run_at": compute_next_run(parsed),
         "last_run_at": None,
@@ -526,9 +529,29 @@ async def _run_job(job: dict, config: Config, data_dir: str):
         prompt = prompt.replace("{STAGING_PATH}", str(staging_dir))
         prompt = prompt.replace("{SKILLS_DIR}", str(skills_dir))
 
+    async def _stream_log(claude_msg):
+        """Log Claude tool calls and text to execution trace (always)."""
+        if claude_msg.tool_name:
+            _log("TOOL", f"[{claude_msg.tool_name}] {str(claude_msg.tool_input)[:200]}")
+        elif claude_msg.content:
+            _log("TEXT", claude_msg.content[:100])
+
+    is_verbose = job.get("verbose", False)
+
+    async def _on_stream(claude_msg):
+        if claude_msg.tool_name:
+            if is_verbose:
+                from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
+                formatter = ReplyFormatter()
+                result = formatter.format_tool_call(claude_msg.tool_name, claude_msg.tool_input)
+                await feishu.send_post(chat_id, result)
+            _stream_log(claude_msg)
+        elif claude_msg.content:
+            _stream_log(claude_msg)
+
     try:
         _log("CLAUDE_QUERY_START")
-        response, session_id, cost = await claude.query(prompt=prompt)
+        response, session_id, cost = await claude.query(prompt=prompt, on_stream=_on_stream)
         elapsed = (datetime.now(_CST) - ts_start).total_seconds()
         _log("CLAUDE_QUERY_DONE", f"elapsed={elapsed:.1f}s, session_id={session_id!r}, cost=${cost:.4f}")
 
@@ -574,7 +597,12 @@ async def _run_job(job: dict, config: Config, data_dir: str):
     output_file = _save_job_output(job_id, data_dir, steps, response=response.strip(), error=None, total_elapsed=total_elapsed)
     logger.info(f"[cron] Job {job_id} output saved to {output_file}")
 
-    # ── Deliver ────────────────────────────────────────────────────────────────
+    # ── Deliver (skip if verbose — content already streamed in real-time) ──────
+    if is_verbose:
+        _log("FEISHU_DELIVERY_SKIPPED_VERBOSE")
+        mark_run(job_id, success=True, data_dir=data_dir)
+        return
+
     from cc_feishu_bridge.format.reply_formatter import should_use_card, optimize_markdown_style
     header = f"⏰ **{job_name}**"
     body = optimize_markdown_style(response.strip(), card_version=2)
