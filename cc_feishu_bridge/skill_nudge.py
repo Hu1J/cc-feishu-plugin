@@ -21,7 +21,10 @@ logger = logging.getLogger(__name__)
 README_CONTENT = """\
 # Skills 目录
 
-此目录用于存放 Claude Code 的自定义 Skill。
+此目录用于存放**用户自己的** Claude Code 自定义 Skill。
+
+**重要**：此目录下的 Skill 由 CC 自动维护，通过 Git 管理历史和回退。
+如需安装来自 GitHub 或其他来源的第三方 Skill，请安装到 `~/.claude/skills/` 目录，勿放在此处。
 
 每个 Skill 是一个独立目录，包含 `SKILL.md` 文件，格式如下：
 
@@ -37,8 +40,6 @@ version: 1.0.0
 
 技能正文内容...
 ```
-
-所有变更通过 Git 管理，可随时查看历史和回退。
 """
 
 
