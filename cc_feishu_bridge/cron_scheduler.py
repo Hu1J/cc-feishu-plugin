@@ -597,12 +597,7 @@ async def _run_job(job: dict, config: Config, data_dir: str):
     output_file = _save_job_output(job_id, data_dir, steps, response=response.strip(), error=None, total_elapsed=total_elapsed)
     logger.info(f"[cron] Job {job_id} output saved to {output_file}")
 
-    # ── Deliver (skip if verbose — content already streamed in real-time) ──────
-    if is_verbose:
-        _log("FEISHU_DELIVERY_SKIPPED_VERBOSE")
-        mark_run(job_id, success=True, data_dir=data_dir)
-        return
-
+    # ── Deliver ────────────────────────────────────────────────────────────────
     from cc_feishu_bridge.format.reply_formatter import should_use_card, optimize_markdown_style
     header = f"⏰ **{job_name}**"
     body = optimize_markdown_style(response.strip(), card_version=2)
