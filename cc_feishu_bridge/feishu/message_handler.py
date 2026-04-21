@@ -306,11 +306,6 @@ class MessageHandler:
                 await self._safe_send(message.chat_id, message.message_id, result.response_text)
             return HandlerResult(success=True)
 
-        # "确认更新" → 仅处理社区 Skill 更新（记忆已改为 CC 自主决策）
-        if content.strip() == "确认更新":
-            asyncio.create_task(self._apply_pending_skill_update(message))
-            return HandlerResult(success=True)
-
         queue = self._get_queue()
         await queue.put(message)
         if self._worker_task is None or self._worker_task.done():
