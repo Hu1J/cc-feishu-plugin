@@ -230,6 +230,7 @@ async def _detect_skill_changes(
     skills_dir: Path,
     chat_id: str | None = None,
     send_to_feishu: Callable[[str, str], Awaitable[None]] | None = None,
+    notify: bool = True,
 ) -> None:
     """Compare before/after git state, detect changes (new/updated/deleted), notify user."""
     after_state = _get_skill_git_state(skills_dir)
@@ -262,7 +263,7 @@ async def _detect_skill_changes(
 
     msg = "🧰 Skill 自进化：" + "、".join(parts)
 
-    if chat_id and send_to_feishu:
+    if notify and chat_id and send_to_feishu:
         try:
             await send_to_feishu(chat_id, msg)
         except Exception as e:
@@ -375,12 +376,13 @@ async def trigger_skill_review(
         response, _, _ = await make_claude_query(prompt)
         logger.info(f"[trigger_skill_review] done: {response[:200] if response else '(empty)'}")
 
-        # Detect changes via git state comparison and notify
+        # Detect changes via git state comparison (don't notify — poll_skill_changes_and_notify handles that)
         await _detect_skill_changes(
             before_state=before_state,
             skills_dir=skills_dir,
             chat_id=chat_id,
             send_to_feishu=send_to_feishu,
+            notify=False,
         )
 
     except Exception as e:

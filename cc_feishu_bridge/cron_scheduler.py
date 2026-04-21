@@ -693,6 +693,7 @@ async def _run_job(job: dict, config: Config, data_dir: str, running_jobs: set[s
                 skills_dir=skills_dir,
                 chat_id=chat_id,
                 send_to_feishu=_skill_send,
+                notify=False,
             )
     except Exception as e:
         logger.warning(f"[cron] Job {job_id} Claude error: {e}")

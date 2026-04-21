@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-04-21
+
+### Fixed
+
+- **Skill 自进化通知双发**：`poll_skill_changes_and_notify` 每 60s 轮询时统一发通知，`_detect_skill_changes` 新增 `notify=False` 参数，`trigger_skill_review` 和 cron skill scan job 传 `notify=False` 避免重复通知。
+
 ## [0.6.2] - 2026-04-21
 
 ### Fixed
