@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-04-21
+
+### Fixed
+
+- **Skill symlink 自动链接**：修复 `poll_skill_changes_and_notify` 中 `_ensure_symlinks` 只在检测到变更时才调用的问题，改为每次 tick 无条件调用（函数本身幂等）。同时首次运行（状态文件为空）时也会调用。新建或更新 Skill 时自动同步 symlink 到 `~/.claude/skills/`。
+
 ## [0.6.0] - 2026-04-21
 
 ### Added
