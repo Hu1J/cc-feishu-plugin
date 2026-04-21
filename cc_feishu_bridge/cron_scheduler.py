@@ -216,6 +216,78 @@ class _CronStore:
         return [str(f) for f in files]
 
 
+class _PendingStore:
+    """Stores pending job notifications that haven't reached their notify_at time."""
+
+    def __init__(self, data_dir: str):
+        self._path = Path(data_dir) / ".pending_notifications.json"
+
+    def _ensure_dir(self):
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _load(self) -> dict:
+        self._ensure_dir()
+        if not self._path.exists():
+            return {}
+        try:
+            with open(self._path, encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return {}
+
+    def _save(self, data: dict):
+        self._ensure_dir()
+        fd, tmp = tempfile.mkstemp(dir=str(self._path.parent), suffix='.tmp', prefix='.pending_')
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self._path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+    def add(self, job_id: str, response: str, chat_id: str, job_name: str, notify_at: str) -> None:
+        """Save a pending notification."""
+        data = self._load()
+        data[job_id] = {
+            "response": response,
+            "chat_id": chat_id,
+            "job_name": job_name,
+            "notify_at": notify_at,
+            "created_at": _utcnow().isoformat(),
+        }
+        self._save(data)
+
+    def get_due(self) -> list[dict]:
+        """Return all pending notifications that are due to be sent."""
+        data = self._load()
+        now = _utcnow()
+        due = []
+        still_pending = {}
+        for job_id, entry in data.items():
+            notify_at = _ensure_aware(datetime.fromisoformat(entry["notify_at"]))
+            if notify_at <= now:
+                entry_copy = dict(entry)
+                entry_copy["job_id"] = job_id
+                due.append(entry_copy)
+            else:
+                still_pending[job_id] = entry
+        if len(data) != len(still_pending):
+            self._save(still_pending)
+        return due
+
+    def remove(self, job_id: str) -> None:
+        """Remove a pending notification after it's been sent."""
+        data = self._load()
+        data.pop(job_id, None)
+        self._save(data)
+
+
 # ─── Schedule Computation ─────────────────────────────────────────────────────
 
 def _ensure_aware(dt: datetime) -> datetime:
@@ -269,6 +341,7 @@ def create_job(
     repeat: Optional[int] = None,
     data_dir: str = "",
     verbose: bool = False,
+    notify_at: Optional[str] = None,
 ) -> dict:
     """
     Create a new cron job.
@@ -281,6 +354,9 @@ def create_job(
         repeat: None = infinite, int = max runs
         data_dir: Bridge data directory
         verbose: If True, stream tool calls to Feishu in real-time (default False)
+        notify_at: Optional cron expression for when to send notification.
+                   If set, execution happens at `schedule` but notification is sent
+                   at `notify_at` instead of immediately after execution.
 
     Returns:
         The created job dict
@@ -289,6 +365,11 @@ def create_job(
     # Auto-set repeat=1 for one-shot if not specified
     if parsed["kind"] == "once" and repeat is None:
         repeat = 1
+
+    # Parse notify_at if provided
+    notify_schedule = None
+    if notify_at:
+        notify_schedule = parse_schedule(notify_at)
 
     job_id = uuid.uuid4().hex[:12]
     now = _utcnow()
@@ -308,6 +389,8 @@ def create_job(
         "state": "scheduled",
         "chat_id": chat_id,
         "verbose": verbose,
+        "notify_at": notify_schedule,
+        "notify_at_display": notify_schedule.get("display") if notify_schedule else None,
         "created_at": now.isoformat(),
         "next_run_at": compute_next_run(parsed),
         "last_run_at": None,
@@ -607,6 +690,17 @@ async def _run_job(job: dict, config: Config, data_dir: str):
     logger.info(f"[cron] Job {job_id} output saved to {output_file}")
 
     # ── Deliver ────────────────────────────────────────────────────────────────
+    notify_schedule = job.get("notify_at")
+    if notify_schedule:
+        # Save to pending store, notify later at notify_at
+        next_notify = compute_next_run(notify_schedule)
+        pending_store = _PendingStore(data_dir)
+        pending_store.add(job_id, response.strip(), chat_id, job_name, next_notify)
+        _log("FEISHU_NOTIFY_PENDING", f"notify_at={next_notify}")
+        logger.info(f"[cron] Job {job_id} notification pending until {next_notify}")
+        mark_run(job_id, success=True, data_dir=data_dir)
+        return
+
     from cc_feishu_bridge.format.reply_formatter import should_use_card, optimize_markdown_style
     header = f"⏰ **{job_name}**"
     body = optimize_markdown_style(response.strip(), card_version=2)
@@ -742,6 +836,32 @@ class CronScheduler:
                 get_chat_id=lambda dd: _get_active_chat_id(dd),
             )
 
+        # Deliver any pending notifications that have reached their notify_at time
+        pending_store = _PendingStore(self.data_dir)
+        due_pending = pending_store.get_due()
+        if due_pending:
+            from cc_feishu_bridge.feishu.client import FeishuClient
+            from cc_feishu_bridge.format.reply_formatter import should_use_card, optimize_markdown_style
+            feishu = FeishuClient(
+                app_id=self.config.feishu.app_id,
+                app_secret=self.config.feishu.app_secret,
+                bot_name=self.config.feishu.bot_name,
+                data_dir=self.data_dir,
+            )
+            for entry in due_pending:
+                header = f"⏰ **{entry['job_name']}**"
+                body = optimize_markdown_style(entry["response"], card_version=2)
+                text = f"{header}\n\n{body}"
+                try:
+                    if should_use_card(body):
+                        await feishu.send_interactive_card(entry["chat_id"], text)
+                    else:
+                        await feishu.send_post(entry["chat_id"], text)
+                    pending_store.remove(entry.get("job_id", ""))
+                    logger.info(f"[cron] Pending notification delivered for job {entry.get('job_id', '')}")
+                except Exception as e:
+                    logger.warning(f"[cron] Pending notification delivery failed: {e}")
+
         due = get_due_jobs(self.data_dir)
         if not due:
             return
@@ -766,7 +886,7 @@ CRON_TOOLS = [
             "properties": {
                 "schedule": {
                     "type": "string",
-                    "description": "Schedule in natural language: '30m' (once in 30min), 'every 1h' (hourly), 'every day 9am' (daily at 9am), '0 9 * * *' (cron expression), '2026-04-20T14:00' (once at specific time)"
+                    "description": "When to execute the job: '30m' (once in 30min), 'every 1h' (hourly), 'every day 9am' (daily at 9am), '0 9 * * *' (cron expression), '2026-04-20T14:00' (once at specific time)"
                 },
                 "prompt": {
                     "type": "string",
@@ -779,6 +899,14 @@ CRON_TOOLS = [
                 "repeat": {
                     "type": "integer",
                     "description": "Maximum number of times to run. Omit or set to null for infinite. One-shot schedules default to 1."
+                },
+                "verbose": {
+                    "type": "boolean",
+                    "description": "If true, stream tool calls to Feishu in real-time as the job runs. Default false."
+                },
+                "notify_at": {
+                    "type": "string",
+                    "description": "Optional: separate schedule for when to send the notification to Feishu. Example: '0 8 * * *' means execute at 'schedule' but notify at 8am. If not set, notify immediately after execution."
                 }
             },
             "required": ["schedule", "prompt"]
