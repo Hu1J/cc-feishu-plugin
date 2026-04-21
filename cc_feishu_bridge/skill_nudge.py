@@ -344,7 +344,6 @@ async def trigger_skill_review(
     nudge: SkillNudge,
     chat_id: str | None = None,
     send_to_feishu: Callable[[str, str], Awaitable[None]] | None = None,
-    pending_store: dict | None = None,
     skills_dir: Path | None = None,
 ) -> None:
     """Trigger a background skill review by calling Claude Code.
@@ -355,7 +354,6 @@ async def trigger_skill_review(
         nudge: the SkillNudge instance to manage counter and pending state
         chat_id: Feishu chat_id to deliver results to (optional)
         send_to_feishu: async callable(chat_id, text) to send a Feishu message (optional)
-        pending_store: dict[chat_id, list[dict]] to store pending community skill updates
         skills_dir: path to skills directory (defaults to ~/.cc-feishu-bridge/skills/)
     """
     if not nudge or not nudge.config.enabled:
@@ -389,39 +387,3 @@ async def trigger_skill_review(
         if nudge:
             nudge.mark_review_done()
 
-
-async def apply_pending_skill_updates(
-    chat_id: str,
-    pending_store: dict,
-    send_to_feishu: Callable[[str, str], Awaitable[None]] | None = None,
-) -> bool:
-    """Apply all pending community skill updates for a chat_id.
-
-    Returns True if any changes were applied.
-    """
-    pending = pending_store.pop(chat_id, [])
-    if not pending:
-        return False
-
-    applied = []
-    for c in pending:
-        try:
-            dest = Path(c["path"])
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(c["proposed_path"], dest)
-            applied.append(c["name"])
-            logger.info(f"[skill_nudge] confirmed apply: {c['name']}")
-        except Exception as e:
-            logger.warning(f"[skill_nudge] failed to apply {c['name']}: {e}")
-
-    if applied and send_to_feishu:
-        try:
-            names = "、".join(f"**{n}**" for n in applied)
-            await send_to_feishu(
-                chat_id,
-                f"✅ Skill 已确认写入：{names}",
-            )
-        except Exception as e:
-            logger.warning(f"[skill_nudge] failed to send confirmation: {e}")
-
-    return len(applied) > 0
