@@ -251,7 +251,7 @@ class _PendingStore:
                 pass
             raise
 
-    def add(self, job_id: str, response: str, chat_id: str, job_name: str, notify_at: str) -> str:
+    def add(self, job_id: str, response: str, chat_id: str, job_name: str, notify_at: str, intermediates: list | None = None) -> str:
         """Save a pending notification. Returns the unique key for this pending entry."""
         data = self._load()
         created_at = _utcnow().isoformat()
@@ -259,6 +259,7 @@ class _PendingStore:
         pending_key = f"{job_id}:{created_at}"
         data[pending_key] = {
             "response": response,
+            "intermediates": intermediates or [],
             "chat_id": chat_id,
             "job_name": job_name,
             "notify_at": notify_at,
@@ -281,10 +282,10 @@ class _PendingStore:
                 due.append(entry_copy)
         return due
 
-    def remove(self, job_id: str) -> None:
+    def remove(self, pending_key: str) -> None:
         """Remove a pending notification after it's been sent."""
         data = self._load()
-        data.pop(job_id, None)
+        data.pop(pending_key, None)
         self._save(data)
 
 
@@ -634,16 +635,26 @@ async def _run_job(job: dict, config: Config, data_dir: str, running_jobs: set[s
             _log("TEXT", claude_msg.content[:100])
 
     is_verbose = job.get("verbose", False)
+    has_notify_at = bool(job.get("notify_at"))
+
+    # When notify_at is set, all output (including intermediate) should be sent at notify_at time.
+    # Disable real-time streaming in this case regardless of verbose setting.
+    stream_to_feishu = is_verbose and not has_notify_at
+
+    # Collect intermediate messages for pending delivery
+    intermediates: list[dict] = []
 
     async def _on_stream(claude_msg):
         try:
             if claude_msg.tool_name:
-                if is_verbose:
-                    from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
-                    from cc_feishu_bridge.format.edit_diff import _DiffMarker, _MemoryCardMarker
-                    from cc_feishu_bridge.format.questionnaire_card import _AskUserQuestionMarker, format_questionnaire_card
-                    formatter = ReplyFormatter()
-                    result = formatter.format_tool_call(claude_msg.tool_name, claude_msg.tool_input)
+                from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
+                from cc_feishu_bridge.format.edit_diff import _DiffMarker, _MemoryCardMarker
+                from cc_feishu_bridge.format.questionnaire_card import _AskUserQuestionMarker, format_questionnaire_card
+                formatter = ReplyFormatter()
+                result = formatter.format_tool_call(claude_msg.tool_name, claude_msg.tool_input)
+
+                if stream_to_feishu:
+                    # Send immediately
                     if isinstance(result, _DiffMarker):
                         await feishu.send_card(chat_id, result.card)
                     elif isinstance(result, list):
@@ -659,12 +670,31 @@ async def _run_job(job: dict, config: Config, data_dir: str, running_jobs: set[s
                         if card:
                             await feishu.send_card(chat_id, card)
                     else:
-                        # Plain string: use same card/post decision as main conversation
                         text = str(result)
                         if formatter.should_use_card(text):
                             await feishu.send_interactive_card(chat_id, text)
                         else:
                             await feishu.send_post(chat_id, text)
+                else:
+                    # Collect for later delivery
+                    if isinstance(result, _DiffMarker):
+                        intermediates.append({"type": "card", "content": result.card})
+                    elif isinstance(result, list):
+                        for marker in result:
+                            if isinstance(marker, _DiffMarker):
+                                intermediates.append({"type": "card", "content": marker.card})
+                    elif isinstance(result, _MemoryCardMarker):
+                        md = result.render()
+                        if md:
+                            intermediates.append({"type": "interactive_card", "content": md})
+                    elif isinstance(result, _AskUserQuestionMarker):
+                        card = format_questionnaire_card(result)
+                        if card:
+                            intermediates.append({"type": "card", "content": card})
+                    else:
+                        text = str(result)
+                        intermediates.append({"type": "text", "content": text})
+
                 await _stream_log(claude_msg)
             elif claude_msg.content:
                 await _stream_log(claude_msg)
@@ -725,7 +755,7 @@ async def _run_job(job: dict, config: Config, data_dir: str, running_jobs: set[s
         # Save to pending store, notify later at notify_at
         next_notify = compute_next_run(notify_schedule)
         pending_store = _PendingStore(data_dir)
-        pending_store.add(job_id, response.strip(), chat_id, job_name, next_notify)
+        pending_store.add(job_id, response.strip(), chat_id, job_name, next_notify, intermediates)
         _log("FEISHU_NOTIFY_PENDING", f"notify_at={next_notify}")
         logger.info(f"[cron] Job {job_id} notification pending until {next_notify}")
         mark_run(job_id, success=True, data_dir=data_dir)
@@ -894,14 +924,32 @@ class CronScheduler:
                 pending_key = entry.get("pending_key", entry.get("job_id", ""))
                 if pending_key in sent_this_tick:
                     continue
-                header = f"⏰ **{entry['job_name']}**"
-                body = optimize_markdown_style(entry["response"], card_version=2)
-                text = f"{header}\n\n{body}"
                 try:
+                    # Send intermediate messages first (in order)
+                    intermediates = entry.get("intermediates", [])
+                    for msg in intermediates:
+                        msg_type = msg.get("type", "text")
+                        content = msg.get("content", "")
+                        if msg_type == "card":
+                            await feishu.send_card(entry["chat_id"], content)
+                        elif msg_type == "interactive_card":
+                            await feishu.send_interactive_card(entry["chat_id"], content)
+                        else:
+                            # text or unknown
+                            if should_use_card(content):
+                                await feishu.send_interactive_card(entry["chat_id"], content)
+                            else:
+                                await feishu.send_post(entry["chat_id"], content)
+
+                    # Send final response
+                    header = f"⏰ **{entry['job_name']}**"
+                    body = optimize_markdown_style(entry["response"], card_version=2)
+                    text = f"{header}\n\n{body}"
                     if should_use_card(body):
                         await feishu.send_interactive_card(entry["chat_id"], text)
                     else:
                         await feishu.send_post(entry["chat_id"], text)
+
                     pending_store.remove(pending_key)
                     sent_this_tick.add(pending_key)
                     logger.info(f"[cron] Pending notification delivered for job {pending_key}")
