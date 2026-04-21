@@ -140,13 +140,14 @@ def _register_skill_optimization_job(data_dir: str, scheduler) -> None:
     try:
         create_job(
             prompt=prompt,
-            schedule="0 9 * * *",  # 每天早上9点
+            schedule="0 3 * * *",  # 每天凌晨3点执行
             chat_id=chat_id,
             name="Skill 优化扫描",
             repeat=None,
             data_dir=data_dir,
+            notify_at="0 9 * * *",  # 早上9点通知结果
         )
-        logger.info("[skill_optimize] registered daily scan")
+        logger.info("[skill_optimize] registered daily scan at 3am, notify at 9am")
     except Exception as e:
         logger.warning(f"[skill_optimize] failed to register: {e}")
 
@@ -237,6 +238,7 @@ def create_handler(config, data_dir: str, config_path: str | None = None) -> Mes
         session_manager=session_manager,
         formatter=formatter,
         approved_directory=config.claude.approved_directory,
+        config=config,
         data_dir=data_dir,
         feishu_groups=config.feishu.groups,
         config_path=config_path,

@@ -118,6 +118,7 @@ class MessageHandler:
         session_manager: SessionManager,
         formatter: ReplyFormatter,
         approved_directory: str,
+        config,
         data_dir: str = "",
         feishu_groups: dict | None = None,
         config_path: str | None = None,
@@ -127,6 +128,12 @@ class MessageHandler:
         self.auth = authenticator
         self.validator = validator
         self.claude = claude
+        # Dedicated Claude instance for memory self-optimization — does not block main conversation
+        self.claude_memory = ClaudeIntegration(
+            cli_path=config.claude.cli_path,
+            max_turns=5,
+            approved_directory=approved_directory,
+        )
         self.sessions = session_manager
         self.formatter = formatter
         self.approved_directory = approved_directory
@@ -175,9 +182,9 @@ class MessageHandler:
         )
 
         async def do_review():
-            # Defensive: ensure claude is initialized before querying
-            if self.claude._options is None:
-                self.claude._init_options()
+            # Dedicated instance — does not block main conversation
+            if self.claude_memory._options is None:
+                self.claude_memory._init_options()
 
             async def stream_callback(claude_msg):
                 if claude_msg.tool_name and claude_msg.tool_name.startswith("mcp__memory__"):
@@ -186,7 +193,7 @@ class MessageHandler:
                     logger.info(f"[memory_review] tool: {claude_msg.tool_name}")
 
             try:
-                await self.claude.query(prompt=prompt, on_stream=stream_callback)
+                await self.claude_memory.query(prompt=prompt, on_stream=stream_callback)
 
             except Exception as e:
                 logger.warning(f"[_trigger_memory_review] failed: {e}")
