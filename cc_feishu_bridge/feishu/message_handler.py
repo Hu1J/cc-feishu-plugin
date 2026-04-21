@@ -1009,25 +1009,11 @@ class MessageHandler:
                         )
                         logger.info(f"[stream] tool: {claude_msg.tool_name} | input: {claude_msg.tool_input}")
 
-                        # Hermes-style skill nudge: increment tool call count
+                        # Hermes-style skill nudge: count tool calls (trigger after query completes)
                         nudge = self._skill_nudge
                         if nudge:
                             nudge.config.current_user = message.user_open_id
-                        if nudge and nudge.increment():
-                            logger.info("[_trigger_skill_review] starting background review")
-                            # Fire-and-forget: trigger review in background, does not block stream
-                            # Uses dedicated claude_skill instance (separate session from main conversation)
-                            if self.claude_skill._options is None:
-                                self.claude_skill._init_options()
-                            asyncio.create_task(
-                                trigger_skill_review(
-                                    make_claude_query=lambda p: self.claude_skill.query(prompt=p),
-                                    nudge=nudge,
-                                    chat_id=message.chat_id,
-                                    send_to_feishu=lambda cid, text: self._safe_send(cid, message.message_id, text),
-                                    skills_dir=Path(self.data_dir) / "skills",
-                                )
-                            )
+                            nudge.increment()
 
                         # _DiffMarker / list[_DiffMarker] → 彩色卡片；其他 → backtick 格式
                         if isinstance(result, _DiffMarker):
@@ -1207,6 +1193,22 @@ class MessageHandler:
                 await self.feishu.remove_typing_reaction(message.message_id, reaction_id)
             # Trigger memory review after [typing] off
             self._trigger_memory_review(message, _last_response)
+
+            # Trigger skill nudge after query completes (not during streaming)
+            nudge = self._skill_nudge
+            if nudge and nudge._pending:
+                logger.info("[_trigger_skill_review] starting background review")
+                if self.claude_skill._options is None:
+                    self.claude_skill._init_options()
+                asyncio.create_task(
+                    trigger_skill_review(
+                        make_claude_query=lambda p: self.claude_skill.query(prompt=p),
+                        nudge=nudge,
+                        chat_id=message.chat_id,
+                        send_to_feishu=lambda cid, text: self._safe_send(cid, message.message_id, text),
+                        skills_dir=Path(self.data_dir) / "skills",
+                    )
+                )
 
     async def _handle_stop(self, message: IncomingMessage) -> HandlerResult:
         """Handle /stop — cancel the current worker task and interrupt Claude."""
