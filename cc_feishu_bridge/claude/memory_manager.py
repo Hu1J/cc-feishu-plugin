@@ -345,25 +345,38 @@ class MemoryManager:
     def inject_context(
         self,
         user_open_id: str,
+        project_path: str | None = None,
     ) -> str:
         """
-        注入指定用户的偏好到 prompt（按 user_open_id 过滤，全量返回）。
+        注入用户偏好和项目记忆到 prompt。
 
-        返回值末尾带版号标记：__PREFS_VERSION:timestamp__
-        偏好更新后 updated_at 变化，版号随之变化，使 CC 下一条消息自动获取最新偏好。
+        用户偏好：全量返回，末尾带版号标记 __PREFS_VERSION:timestamp__
+        项目记忆：最新 5 条，仅 title
+
+        版号使 CC 下一条消息自动获取最新偏好。
         """
+        parts: list[str] = []
+
         prefs = self.get_preferences_by_user(user_open_id)
-        if not prefs:
-            return ""
-        lines = ["\n【用户偏好】", "---"]
-        for p in prefs:
-            lines.append(f"**{p.title}**")
-            lines.append(f"{p.content}")
-            lines.append("")
-        # 版号：所有偏好中最新的 updated_at，偏好变更后此值必变
-        latest = max(p.updated_at for p in prefs if p.updated_at)
-        lines.append(f"\n__PREFS_VERSION:{latest}__")
-        return "\n".join(lines)
+        if prefs:
+            lines = ["\n【用户偏好】", "---"]
+            for p in prefs:
+                lines.append(f"**{p.title}**")
+                lines.append(f"{p.content}")
+                lines.append("")
+            latest = max(p.updated_at for p in prefs if p.updated_at)
+            lines.append(f"\n__PREFS_VERSION:{latest}__")
+            parts.append("\n".join(lines))
+
+        if project_path:
+            mems = self.get_project_memories(project_path)[:5]
+            if mems:
+                lines = ["\n【项目记忆（最新 5 条）】", "---"]
+                for m in mems:
+                    lines.append(f"- {m.title}")
+                parts.append("\n".join(lines))
+
+        return "\n".join(parts)
 
     # ── 项目记忆 ───────────────────────────────────────────────────────────────
 
