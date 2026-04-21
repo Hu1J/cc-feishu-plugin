@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-21
+
+### Added
+
+- **Skill Self-Evolution（技能自进化）**：新增 `skill_nudge.py` 模块，每 10 次工具调用触发一次 skill 质量审核。独立 Claude session 在后台运行，评估 skill 改进建议并自动 git commit。启动时自动检测并初始化 skills 目录的 git 仓库。
+- **记忆做梦（Memory Dream）**：新增 `dream.py` 模块，每日凌晨 3 点自动精炼记忆库（合并冗余、精简内容、删除过时），早上 8 点推送总结报告到飞书。
+- **三次独立 Claude 实例**：主对话（`self.claude`）、记忆优化（`self.claude_memory`）、技能审核（`self.claude_skill`）三个实例各自独立 session，互不干扰。
+- **Cron Verbose 模式**：支持流式中间过程推送，执行日志完整记录每个阶段（JOB_TRIGGERED → CLAUDE_QUERY → FEISHU_DELIVERY）。
+- **Cron 统一渲染**：`_DiffMarker`、`_MemoryCardMarker`、`_AskUserQuestionMarker` 在 cron verbose 和主对话中复用同一套渲染逻辑。
+- **`_MemoryCardMarker.render()` 和 `_DiffMarker.render()`**：为 cron verbose 模式新增 markdown 渲染方法，主对话走飞书卡片，cron verbose 走飞书帖子。
+- **`notify_at` 延迟通知**：cron 任务支持 `notify_at` 字段，延迟到指定时间才推送执行结果。
+- **项目记忆标题注入**：每次对话除了注入用户偏好，还自动注入当前项目最新 5 条记忆的标题。
+- **`/cron` 命令**：飞书端管理定时任务（add/del/list/pause/resume/run）。
+
+### Changed
+
+- **`_get_tfidf_cache()` 锁优化**：从"全锁"改为双检查锁定（无锁快路径 + 有锁写入），允许并发读。
+- **`inject_context` 内容截断**：用户偏好 content 截断到 200 字符，防止 context 膨胀。
+- **`trigger_skill_review` 触发时机**：从 stream_callback 移到 finally block（typing off 之后），确保 skill 审核不在流式输出过程中打扰用户。
+- **skills 目录 git 检测**：从 `git rev-parse --git-dir` 改为 `Path(".git").exists()`，避免父目录 .git 误判。
+- **Cron 重叠防护**：新增 `_running_jobs` 集合防止同一 job 在 60s tick 内重复触发。
+
+### Fixed
+
+- **`_DiffMarker.render()` 垃圾输出**：修复将 `list[DiffLine]` 直接插 f-string 的问题，正确格式化 diff 文本。
+- **`result.card_md` 属性不存在**：`send_interactive_reply` 失败时 fallback 使用本地 `card_md` 变量而非不存在的 `result.card_md`。
+- **`Callable` 未导入**：修复 `memory_manager.py` 中 `Callable` 类型注解缺少导入的问题。
+- **`max()` 空序列崩溃**：修复 `inject_context` 中 prefs 为空时 `max()` 抛 `ValueError` 的问题。
+- **`remove_typing_reaction` finally 无保护**：Feishu API 失败时会替换原异常，现加局部 try/except。
+- **`trigger_skill_review` finally 无保护**：启动失败会替换原异常，现加局部 try/except。
+- **MCP 工具调用中文乱码**：`json.dumps` 使用 `ensure_ascii=False` 保留中文。
+- **`session_id` 碰撞**：同一秒创建的多个 session 因 UUID 后缀碰撞 → 使用更长的 UUID。
+- **Skill Nudge 在 query 完成前触发**：修复 skill 审核在流式输出过程中触发的问题，改为 query 完成后触发。
+
 ## [0.5.1] - 2026-04-20
 
 ### Fixed
