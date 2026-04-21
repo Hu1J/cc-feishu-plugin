@@ -293,8 +293,10 @@ async def poll_skill_changes_and_notify(
 
     current_state = _get_skill_git_state(skills_dir)
 
-    # First run: just save state, no notification
+    # First run: ensure symlinks for all existing skills, then save state
     if not last_state:
+        symlink_dir = Path.home() / ".claude" / "skills"
+        _ensure_symlinks(skills_dir, symlink_dir)
         state_file.write_text(json.dumps(current_state, ensure_ascii=False), encoding="utf-8")
         return
 
@@ -319,11 +321,9 @@ async def poll_skill_changes_and_notify(
     if not changed:
         return
 
-    # Only symlink when new skills are created
-    new_skills = [c for c in changed if c["action"] == "🆕 新建"]
-    if new_skills:
-        symlink_dir = Path.home() / ".claude" / "skills"
-        _ensure_symlinks(skills_dir, symlink_dir)
+    # Always ensure symlinks exist when there are changes (idempotent, safe to call on every tick)
+    symlink_dir = Path.home() / ".claude" / "skills"
+    _ensure_symlinks(skills_dir, symlink_dir)
 
     # Send notification
     parts = []
