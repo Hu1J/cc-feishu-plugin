@@ -157,7 +157,11 @@ SKILL_NUDGE_PROMPT = """\
 1. 先查看 {SKILLS_DIR}/ 目录下已有的 Skill
 2. 把完整内容直接写入 {SKILLS_DIR}/<skill-name>/SKILL.md
 3. 格式：YAML frontmatter (name/description/author/version) + Markdown body
-4. {SKILLS_DIR}/ 本身是一个 Git 仓库。写入 SKILL.md 后，在 {SKILLS_DIR}/ 目录下执行 `git add <skill-name>/ && git commit -m "<中文 commit message>"`，commit message 必须用中文，清晰说明本次改动内容
+4. {SKILLS_DIR}/ 本身是一个 Git 仓库。写入 SKILL.md 后，进入该目录执行：
+   ```
+   cd {SKILLS_DIR} && git add <skill-name>/ && git commit -m "<中文 commit message>"
+   ```
+   commit message 必须用中文，清晰说明本次改动内容
 
 注意：
 - 只创建真正有价值的 Skill，不要为了"有"而创建

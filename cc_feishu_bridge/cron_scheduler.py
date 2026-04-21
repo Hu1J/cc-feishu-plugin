@@ -846,6 +846,7 @@ class CronScheduler:
         # Deliver any pending notifications that have reached their notify_at time
         pending_store = _PendingStore(self.data_dir)
         due_pending = pending_store.get_due()
+        sent_this_tick: set[str] = set()  # dedup: skip entries sent successfully this tick
         if due_pending:
             from cc_feishu_bridge.feishu.client import FeishuClient
             from cc_feishu_bridge.format.reply_formatter import should_use_card, optimize_markdown_style
@@ -856,16 +857,19 @@ class CronScheduler:
                 data_dir=self.data_dir,
             )
             for entry in due_pending:
+                pending_key = entry.get("pending_key", entry.get("job_id", ""))
+                if pending_key in sent_this_tick:
+                    continue
                 header = f"⏰ **{entry['job_name']}**"
                 body = optimize_markdown_style(entry["response"], card_version=2)
                 text = f"{header}\n\n{body}"
-                pending_key = entry.get("pending_key", entry.get("job_id", ""))
                 try:
                     if should_use_card(body):
                         await feishu.send_interactive_card(entry["chat_id"], text)
                     else:
                         await feishu.send_post(entry["chat_id"], text)
                     pending_store.remove(pending_key)
+                    sent_this_tick.add(pending_key)
                     logger.info(f"[cron] Pending notification delivered for job {pending_key}")
                 except Exception as e:
                     logger.warning(f"[cron] Pending notification delivery failed: {e}")

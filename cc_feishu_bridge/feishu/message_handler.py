@@ -1021,7 +1021,6 @@ class MessageHandler:
                                     send_to_feishu=lambda cid, text: self._safe_send(cid, message.message_id, text),
                                     pending_store=self._pending_skill_updates,
                                     skills_dir=Path(self.data_dir) / "skills",
-                                    staging_dir_base=Path(self.data_dir) / "skills_staging",
                                 )
                             )
 
