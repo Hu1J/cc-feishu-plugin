@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import tempfile
 import threading
 import uuid
@@ -31,6 +32,23 @@ from typing import Optional
 from cc_feishu_bridge.config import Config
 from cc_feishu_bridge.claude.integration import ClaudeIntegration
 from cc_feishu_bridge.feishu.client import FeishuClient
+
+
+def _get_active_chat_id(data_dir: str) -> str | None:
+    """Get the most recent active session's chat_id."""
+    db_path = os.path.join(data_dir, "sessions.db")
+    if not os.path.exists(db_path):
+        return None
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT chat_id FROM sessions WHERE chat_id IS NOT NULL ORDER BY last_used DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        return row["chat_id"] if row else None
+    except Exception:
+        return None
 
 logger = logging.getLogger(__name__)
 
@@ -706,6 +724,24 @@ class CronScheduler:
 
     async def _tick(self):
         """Check for due jobs and run them. Awaits all jobs to ensure completion."""
+        # Poll skill changes on every tick (independent of job scheduling)
+        skills_dir = Path(self.data_dir) / "skills"
+        if skills_dir.exists():
+            from cc_feishu_bridge.skill_nudge import poll_skill_changes_and_notify
+            from cc_feishu_bridge.feishu.client import FeishuClient
+            feishu = FeishuClient(
+                app_id=self.config.feishu.app_id,
+                app_secret=self.config.feishu.app_secret,
+                bot_name=self.config.feishu.bot_name,
+                data_dir=self.data_dir,
+            )
+            await poll_skill_changes_and_notify(
+                data_dir=self.data_dir,
+                skills_dir=skills_dir,
+                send_to_feishu=lambda cid, text: feishu.send_post(cid, text),
+                get_chat_id=lambda dd: _get_active_chat_id(dd),
+            )
+
         due = get_due_jobs(self.data_dir)
         if not due:
             return

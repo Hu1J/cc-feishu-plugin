@@ -418,6 +418,10 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     set_cron_scheduler(cron_scheduler, config)
     cron_scheduler.start()
 
+    # Ensure skills directory is a git repo (init if needed)
+    from cc_feishu_bridge.skill_nudge import _ensure_skills_git_repo
+    _ensure_skills_git_repo(Path(data_dir) / "skills")
+
     # Register daily skill optimization scan
     _register_skill_optimization_job(data_dir, cron_scheduler)
 

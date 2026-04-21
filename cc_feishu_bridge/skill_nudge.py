@@ -7,14 +7,69 @@ creating or updating a skill based on recent conversation patterns.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
+import subprocess
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Awaitable
 
 logger = logging.getLogger(__name__)
+
+README_CONTENT = """\
+# Skills 目录
+
+此目录用于存放 Claude Code 的自定义 Skill。
+
+每个 Skill 是一个独立目录，包含 `SKILL.md` 文件，格式如下：
+
+```markdown
+---
+name: skill-name
+description: 技能描述
+author: your-name
+version: 1.0.0
+---
+
+# 技能名称
+
+技能正文内容...
+```
+
+所有变更通过 Git 管理，可随时查看历史和回退。
+"""
+
+
+def _ensure_skills_git_repo(skills_dir: Path) -> None:
+    """Ensure skills_dir exists and is a git repo, creating README if needed."""
+    if not skills_dir.exists():
+        skills_dir.mkdir(parents=True, exist_ok=True)
+
+    # Check if it's a git repo
+    result = subprocess.run(
+        ["git", "rev-parse", "--git-dir"],
+        cwd=str(skills_dir),
+        capture_output=True, text=True,
+    )
+    is_git = result.returncode == 0
+
+    if not is_git:
+        subprocess.run(["git", "init"], cwd=str(skills_dir), capture_output=True)
+        readme_path = skills_dir / "README.md"
+        readme_path.write_text(README_CONTENT, encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "README.md"],
+            cwd=str(skills_dir),
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "初始化 Skills 目录"],
+            cwd=str(skills_dir),
+            capture_output=True,
+        )
+        logger.info(f"[skill_nudge] initialized git repo at {skills_dir}")
 
 
 @dataclass
@@ -202,7 +257,6 @@ def _get_skill_git_state(skills_dir: Path) -> dict[str, str | None]:
     state: dict[str, str | None] = {}
     if not skills_dir.exists():
         return state
-    import subprocess
     for skill_path in skills_dir.iterdir():
         if not skill_path.is_dir():
             continue
@@ -224,7 +278,6 @@ def _get_skill_git_state(skills_dir: Path) -> dict[str, str | None]:
 
 def _get_skill_commit_message(skills_dir: Path, skill_name: str, sha: str) -> str:
     """Get the commit message for a given SHA."""
-    import subprocess
     try:
         result = subprocess.run(
             ["git", "log", "-1", "--format=%s", sha],
@@ -242,7 +295,7 @@ async def _detect_skill_changes(
     chat_id: str | None = None,
     send_to_feishu: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> None:
-    """Compare before/after git state, detect changes, notify user."""
+    """Compare before/after git state, detect changes (new/updated/deleted), notify user."""
     after_state = _get_skill_git_state(skills_dir)
 
     changed = []
@@ -256,6 +309,11 @@ async def _detect_skill_changes(
             # Updated skill
             msg = _get_skill_commit_message(skills_dir, skill_name, sha)
             changed.append({"name": skill_name, "action": "🔄 更新", "commit": msg})
+
+    # Detect deleted skills
+    for skill_name, before_sha in before_state.items():
+        if skill_name not in after_state and before_sha is not None:
+            changed.append({"name": skill_name, "action": "🗑️ 删除", "commit": ""})
 
     if not changed:
         return
@@ -273,6 +331,72 @@ async def _detect_skill_changes(
             await send_to_feishu(chat_id, msg)
         except Exception as e:
             logger.warning(f"[skill_nudge] failed to send to Feishu: {e}")
+
+
+async def poll_skill_changes_and_notify(
+    data_dir: str,
+    skills_dir: Path,
+    send_to_feishu: Callable[[str, str], Awaitable[None]] | None = None,
+    get_chat_id: Callable[[str], str | None] | None = None,
+) -> None:
+    """Poll skills directory for changes and notify user.
+
+    Stores last known state in data_dir/.skill_poll_state.json.
+    Detects new, updated, and deleted skills since last poll.
+    Sends notification to the current active chat_id.
+    """
+    state_file = Path(data_dir) / ".skill_poll_state.json"
+
+    # Load last state
+    last_state: dict[str, str | None] = {}
+    if state_file.exists():
+        try:
+            last_state = json.loads(state_file.read_text(encoding="utf-8"))
+        except Exception:
+            last_state = {}
+
+    current_state = _get_skill_git_state(skills_dir)
+
+    # First run: just save state, no notification
+    if not last_state:
+        state_file.write_text(json.dumps(current_state, ensure_ascii=False), encoding="utf-8")
+        return
+
+    # Detect changes
+    changed = []
+    for skill_name, sha in current_state.items():
+        before_sha = last_state.get(skill_name)
+        if before_sha is None and sha is not None:
+            msg = _get_skill_commit_message(skills_dir, skill_name, sha)
+            changed.append({"name": skill_name, "action": "🆕 新建", "commit": msg})
+        elif sha != before_sha and sha is not None:
+            msg = _get_skill_commit_message(skills_dir, skill_name, sha)
+            changed.append({"name": skill_name, "action": "🔄 更新", "commit": msg})
+
+    for skill_name, before_sha in last_state.items():
+        if skill_name not in current_state and before_sha is not None:
+            changed.append({"name": skill_name, "action": "🗑️ 删除", "commit": ""})
+
+    # Save current state
+    state_file.write_text(json.dumps(current_state, ensure_ascii=False), encoding="utf-8")
+
+    if not changed:
+        return
+
+    # Send notification
+    parts = []
+    for c in changed:
+        commit_info = f"（{c['commit']}）" if c['commit'] else ""
+        parts.append(f"{c['action']} **{c['name']}**{commit_info}")
+
+    msg = "🧰 Skill 自进化：" + "、".join(parts)
+
+    chat_id = get_chat_id(data_dir) if get_chat_id else None
+    if chat_id and send_to_feishu:
+        try:
+            await send_to_feishu(chat_id, msg)
+        except Exception as e:
+            logger.warning(f"[poll_skill_changes] failed to send to Feishu: {e}")
 
 
 async def trigger_skill_review(
