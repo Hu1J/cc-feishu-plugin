@@ -138,8 +138,6 @@ class MessageHandler:
         self.memory_manager = get_memory_manager()
         self.memory_manager.set_system_prompt_stale_callback(self.claude.mark_system_prompt_stale)
         self._skill_nudge = skill_nudge
-        # Per-chat pending memory suggestion: chat_id -> suggestion text
-        self._pending_memory_suggestions: dict[str, str] = {}
         # Per-chat pending community skill updates: chat_id -> list of pending skill changes
         self._pending_skill_updates: dict[str, list] = {}
         self._queue: asyncio.Queue[IncomingMessage] | None = None
@@ -168,95 +166,84 @@ class MessageHandler:
         return self._queue
 
     def _trigger_memory_review(self, message: IncomingMessage, response_text: str) -> None:
-        """Ask the user if they want to update memory based on this conversation.
+        """Monitor memory changes after each conversation ends.
 
-        This fires after every conversation ends. It does NOT auto-write memory —
-        it asks the user first via Feishu message.
+        Asks Claude if anything worth remembering happened. If yes, the bridge
+        calls MemoryAddProj to write it. Then diffs before/after state and
+        notifies the user only if memory actually changed.
         """
+        project_path = getattr(self, "_current_project_path", "")
+        mm = self.memory_manager
+        # Snapshot before
+        before_ids = set()
+        if mm and project_path:
+            try:
+                before_ids = {m.id for m in mm.get_project_memories(project_path)}
+            except Exception:
+                pass
+
         prompt = (
-            f"项目路径：{getattr(self, '_current_project_path', '')}\n\n"
+            f"项目路径：{project_path}\n\n"
             f"对话刚结束，用户说：{message.content[:200]}\n\n"
             f"Claude 的回复摘要：{response_text[:300] if response_text else '(无文本回复)'}\n\n"
-            "思考：这次对话中有没有值得记住的信息？（比如用户偏好、项目惯例、刚学到的知识点）\n"
-            "如果有必要更新记忆（MEMORY.md），请生成更新内容并告诉我具体要更新什么。\n"
-            '格式：\n- 如果需要更新记忆：直接告诉我「建议更新：xxx」\n- 如果没什么值得记住的：回复「无需更新」\n'
+            "这段对话中有没有值得写入项目记忆的信息？\n"
+            "如果需要写入，请给出以下格式的内容（直接输出，不要解释）：\n"
+            "title：一条简短的标题（不超过20字）\n"
+            "content：记忆内容（具体、完整，100字以内）\n"
+            "keywords：关键词，用逗号分隔（3-5个）\n\n"
+            "如果没什么值得记住的，直接回复「无需更新」。\n"
         )
 
         async def do_review():
             try:
                 result, _, _ = await self.claude.query(prompt=prompt)
-                if result and "无需更新" not in result and "建议更新" in result:
-                    suggestion = result.strip()
-                    self._pending_memory_suggestions[message.chat_id] = suggestion
+                if not result or result.strip() == "无需更新":
+                    return  # CC decided nothing worth remembering
+
+                # Parse CC's response for title/content/keywords
+                title, content, keywords = "", "", ""
+                for line in result.strip().splitlines():
+                    if line.startswith("title：") or line.startswith("title:"):
+                        title = line.split("：", 1)[-1].strip() or line.split(":", 1)[-1].strip()
+                    elif line.startswith("content：") or line.startswith("content:"):
+                        content = line.split("：", 1)[-1].strip() or line.split(":", 1)[-1].strip()
+                    elif line.startswith("keywords：") or line.startswith("keywords:"):
+                        keywords = line.split("：", 1)[-1].strip() or line.split(":", 1)[-1].strip()
+
+                if not title or not content:
+                    logger.warning(f"[_trigger_memory_review] invalid response: {result[:100]}")
+                    return
+
+                # Write memory via bridge (CC decides, bridge executes)
+                if mm and project_path:
+                    try:
+                        mm.add_project_memory(project_path, title, content, keywords)
+                    except Exception as e:
+                        logger.warning(f"[_trigger_memory_review] failed to add memory: {e}")
+                        return
+
+                # Diff: check if new entries appeared
+                after_ids = set()
+                if mm and project_path:
+                    try:
+                        after_ids = {m.id for m in mm.get_project_memories(project_path)}
+                    except Exception:
+                        pass
+
+                new_ids = after_ids - before_ids
+                if new_ids and message.chat_id:
                     try:
                         await self._safe_send(
                             message.chat_id, message.message_id,
-                            "💡 记忆更新建议：\n\n" + suggestion + "\n\n回复'确认更新'我可帮你写入记忆。",
+                            f"💡 记忆已自主更新：\n\n**{title}**\n{content}",
                         )
                     except Exception as send_err:
-                        # safe_send failed — clear pending so user is not stuck
                         logger.warning(f"[_trigger_memory_review] safe_send failed: {send_err}")
-                        self._pending_memory_suggestions.pop(message.chat_id, None)
+
             except Exception as e:
                 logger.warning(f"[_trigger_memory_review] failed: {e}")
 
         asyncio.create_task(do_review())
-
-    def _apply_memory_update(self, message: IncomingMessage) -> None:
-        """Write the pending memory suggestion to MEMORY.md after user confirms.
-
-        Reads the stored suggestion from _pending_memory_suggestions[chat_id], asks Claude
-        to format it properly, then appends/writes to the project's MEMORY.md.
-        """
-        suggestion = self._pending_memory_suggestions.get(message.chat_id)
-        if not suggestion:
-            asyncio.create_task(self._safe_send(
-                message.chat_id, message.message_id,
-                "没有待确认的记忆更新，上一次对话结束我没有收到任何建议。",
-            ))
-            return
-
-        project_path = getattr(self, '_current_project_path', '')
-        prompt = (
-            f"项目路径：{project_path}\n\n"
-            f"要把以下内容写入 MEMORY.md，请生成完整的更新文本（直接写入的内容，不要解释）：\n\n"
-            f"{suggestion}\n\n"
-            "要求：\n"
-            "1. 用 Markdown 格式\n"
-            "2. 包含适当的标题和内容\n"
-            "3. 直接输出要写入 MEMORY.md 的内容，不要加任何说明\n"
-        )
-
-        async def do_apply():
-            try:
-                result, _, _ = await self.claude.query(prompt=prompt)
-                if not result or result.strip() == "无需更新":
-                    await self._safe_send(message.chat_id, message.message_id, "好的，不写入记忆。")
-                    self._pending_memory_suggestions.pop(message.chat_id, None)
-                    return
-
-                content = result.strip()
-                memory_path = Path(project_path) / "MEMORY.md"
-                existing = ""
-                if memory_path.exists():
-                    existing = memory_path.read_text(errors="replace")
-
-                # Append under a new section
-                updated = existing.rstrip() + "\n\n" + content + "\n"
-                memory_path.write_text(updated, errors="replace")
-                self._pending_memory_suggestions.pop(message.chat_id, None)
-                await self._safe_send(
-                    message.chat_id, message.message_id,
-                    f"✅ 记忆已更新：\n\n{content[:500]}",
-                )
-            except Exception as e:
-                logger.warning(f"[_apply_memory_update] failed: {e}")
-                await self._safe_send(
-                    message.chat_id, message.message_id,
-                    f"写入记忆失败：{e}",
-                )
-
-        asyncio.create_task(do_apply())
 
     async def _apply_pending_skill_update(self, message: IncomingMessage) -> None:
         """Apply pending community skill updates after user confirms with "确认更新"."""
@@ -378,10 +365,9 @@ class MessageHandler:
                 await self._safe_send(message.chat_id, message.message_id, result.response_text)
             return HandlerResult(success=True)
 
-        # "确认更新" → 同时处理 Skill 更新（优先）和记忆写入
+        # "确认更新" → 仅处理社区 Skill 更新（记忆已改为 CC 自主决策）
         if content.strip() == "确认更新":
             asyncio.create_task(self._apply_pending_skill_update(message))
-            asyncio.create_task(self._apply_memory_update(message))
             return HandlerResult(success=True)
 
         queue = self._get_queue()
