@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -283,23 +282,6 @@ class HermesIndexSource(SkillSource):
                     break
 
         return results
-
-    async def get_by_name(self, name: str) -> Optional[SkillMeta]:
-        index = await self._get_index()
-
-        for s in index.get("skills", []):
-            if s.get("name") == name:
-                return SkillMeta(
-                    name=s.get("name", name),
-                    description=s.get("description", ""),
-                    source=self.name,
-                    identifier=s.get("identifier", name),
-                    trust_level=s.get("trust_level", "medium"),
-                    tags=s.get("tags", []),
-                    extra=s,
-                )
-
-        return None
 
     async def close(self):
         await self._client.aclose()
