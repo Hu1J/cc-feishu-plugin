@@ -1,5 +1,7 @@
 # cc-feishu-bridge
 
+> **⚠️ 此项目已停止维护** — cc-feishu-bridge 已迁移到新项目 **[SuperCC](https://github.com/Hu1J/supercc)**。所有新功能将在 SuperCC 中继续开发。当 PyPI 上存在 SuperCC 时，执行 `/update` 会自动完成数据迁移并切换到 SuperCC。
+
 Claude Code 飞书桥接插件 — 在飞书中与本地 Claude Code 对话，同时具备**记忆自优化**和**技能自进化**能力。
 
 ## 核心能力

@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-04-22
+
+### Added
+
+- **SuperCC 迁移支持（最终版）**：当 PyPI 上存在 `supercc` 包时，`/update` 自动执行数据迁移后安装并切换到 SuperCC。迁移内容：家目录 `~/.cc-feishu-bridge/memories.db` → `~/.supercc/memories.db`；项目目录 `.cc-feishu-bridge/` → `.supercc/`（`cron_jobs.json`、清理后的 `config.yaml`、`skills/`）。此版本为 cc-feishu-bridge 最终版本，之后不再维护，所有新功能将在 SuperCC 中继续开发。
+- **`auto-migration-update` Skill**：记录项目重命名/迁移时的自动化升级模式。
+
+### Changed
+
+- **重启指令动态化**：`_start_bridge`、`_restart_to`、`_do_update` 增加 `package` 参数，升级到 SuperCC 后自动使用 `supercc start` 启动，数据目录使用 `.supercc/`。
+- **更新流程重构**：`/update` 检测到 supercc 时自动完成迁移、安装、重启，全程无需手动操作。
+
 ## [0.6.4] - 2026-04-22
 
 ### Fixed
